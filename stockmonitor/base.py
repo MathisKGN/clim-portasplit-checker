@@ -50,6 +50,18 @@ class ScannerBase(ABC):
     DEFAULT_PRODUCT_URL: str = ""         # URL fiche produit (scrap / init)
     HAS_ONLINE_AVAILABILITY: bool = False  # l'enseigne expose-t-elle la dispo en ligne ?
 
+    # Clé de section dans config.toml (ex. "lm", "casto"). Défaut : nom canonique.
+    CONFIG_KEY: str = ""
+
+    @classmethod
+    def get_defaults(cls) -> dict:
+        """Defaults codés (fallback quand config.toml + CLI ne disent rien).
+
+        Surchargé par les sous-classes pour exposer leurs attributs attendus.
+        Toujours inférieur en priorité à config.toml et à la CLI.
+        """
+        return {}
+
     # ------------------------------------------------------------------ #
     # Hooks à implémenter
     # ------------------------------------------------------------------ #
@@ -309,8 +321,34 @@ class ScannerBase(ABC):
         """Hook optionnel : setup page navigateur, route, etc. No-op par défaut."""
         pass
 
-    def run_main(self, args):
-        """Boucle principale : un seul run ou auto-boucle (--loop)."""
+    def apply_config(self, args, cfg: dict) -> None:
+        """Resout tous les attributs attendus dans `args`.
+
+        Priorité : CLI (déjà posée si non-None) > config.toml > get_defaults().
+        À appeler une fois avant run_cycle / _run_loop.
+        """
+        from .config import merge_config_into_args
+        # 1/ defaults codés (priorité basse)
+        for k, v in self.get_defaults().items():
+            if getattr(args, k, None) is None:
+                setattr(args, k, v)
+        # 2/ config.toml (surclasse les defaults codés, pas la CLI)
+        merge_config_into_args(args, cfg, self.CONFIG_KEY or self.prefix)
+        # 3/ substitue les placeholders produit si la CLI n'a rien passé
+        if getattr(args, "product_ref", None) is None:
+            args.product_ref = self.DEFAULT_PRODUCT_REF
+        if getattr(args, "product_url", None) is None:
+            args.product_url = self.DEFAULT_PRODUCT_URL
+
+    def run_main(self, args, cfg: dict | None = None):
+        """Boucle principale : un seul run ou auto-boucle (--loop).
+
+        `cfg` est la config chargée (config.toml). Appliquée avant tout.
+        """
+        from .config import load_config
+        cfg = cfg if cfg is not None else load_config(getattr(args, "config", None))
+        self.apply_config(args, cfg)
+
         Path(args.data_dir).mkdir(parents=True, exist_ok=True)
 
         if getattr(args, "loop", 0) and args.loop > 0:

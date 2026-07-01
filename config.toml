@@ -1,0 +1,40 @@
+# Configuration du moniteur de stock.
+# Modifie ce fichier plutôt que d'empiler des --flags sur la CLI.
+# La CLI ne garde que l'essentiel (retailer, produit, loop, notify-cmd, -v).
+# Valeurs CLI > valeurs de ce fichier > defaults codés.
+
+[common]
+data_dir    = "data"     # dossier sorties + cache + état
+loop        = 900        # auto-boucle toutes les N sec (0 = one-shot). 900 = 15 min.
+notify_cmd  = ""         # commande shell exécutée si restock
+verbose     = false
+
+[lm]
+# Produit (modifiable par produit traqué) — CLI --product-ref / --product-url
+product_ref = "93857579"
+product_url = "https://www.leroymerlin.fr/produits/climatiseur-split-mobile-reversible-portasplit-midea-par-optimea-93857579.html"
+
+# Zone de scan : idf | paris200 | france
+zone = "idf"
+wide         = false       # + couronne élargie (Reims/Troyes/Orléans/Auxerre…)
+max_seeds    = 0           # 0 = tous
+
+# Cadence — un humain ne scanne pas 36 magasins en 3 min.
+min_delay    = 2.0
+max_delay    = 5.0
+stable_rounds = 3          # arrêt après N seeds sans nouveau magasin
+max_blocks   = 3           # blocages avant arrêt (anti-grillade)
+
+# Transport HTTP
+impersonate  = "firefox135"  # profil TLS curl_cffi
+
+[casto]
+# Produit — CLI --product-url (.prd, EAN déduit). Pas de product_ref (EAN dans l'URL).
+product_url = "https://www.castorama.fr/climatiseur-portasplit-midea-reversible-3500w/8431312260509_CAFR.prd"
+postcode  = "75011"          # CP pour dispo livraison à domicile
+page_size = 50               # magasins par seed
+max_seeds = 0                # 0 = tous
+min_delay = 0.8
+max_delay = 2.0
+stable_rounds = 3
+token_ttl = 21600            # 6 h — réutilisation du token caché

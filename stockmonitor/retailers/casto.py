@@ -224,6 +224,20 @@ class CastoScanner(ScannerBase):
     DEFAULT_PRODUCT_REF = "8431312260509"
     DEFAULT_PRODUCT_URL = DEFAULT_PRODUCT_URL
     HAS_ONLINE_AVAILABILITY = True
+    CONFIG_KEY = "casto"
+
+    @classmethod
+    def get_defaults(cls) -> dict:
+        return {
+            "postcode": "75011",
+            "page_size": 50,
+            "max_seeds": 0,
+            "min_delay": 0.8,
+            "max_delay": 2.0,
+            "stable_rounds": 3,
+            "token_ttl": TOKEN_TTL_S,
+            "product_url": cls.DEFAULT_PRODUCT_URL,
+        }
 
     def store_url(self, store: dict) -> str:
         return store.get("url", "")
@@ -247,22 +261,10 @@ class CastoScanner(ScannerBase):
             "online_available": online.get("available"),
         }
 
-    # --- CLI --------------------------------------------------------------- #
+    # --- CLI (minimal : juste l'override produit) ------------------------- #
     def add_arguments(self, parser):
-        parser.add_argument("--product-url", default=DEFAULT_PRODUCT_URL,
-                            help="URL fiche produit Castorama (.prd). L'EAN est déduit.")
-        parser.add_argument("--postcode", default="75011",
-                            help="Code postal pour la dispo livraison à domicile.")
-        parser.add_argument("--page-size", type=int, default=50,
-                            help="Magasins demandés par seed (defaut 50).")
-        parser.add_argument("--max-seeds", type=int, default=0, metavar="N",
-                            help="Limite aux N premiers seeds France (0 = tous).")
-        parser.add_argument("--stable-rounds", type=int, default=3,
-                            help="Arrêt après N seeds sans nouveau magasin.")
-        parser.add_argument("--token-ttl", type=int, default=TOKEN_TTL_S,
-                            help="Durée (s) de réutilisation du token caché (defaut 6h).")
-        parser.add_argument("--min-delay", type=float, default=0.8)
-        parser.add_argument("--max-delay", type=float, default=2.0)
+        # --product-url déjà ajouté par les args communs.
+        pass
 
     def enrich_args(self, args):
         """Args n'a pas de --product-ref pour Casto (c'est un EAN déduit de l'URL).

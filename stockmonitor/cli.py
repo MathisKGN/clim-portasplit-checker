@@ -2,20 +2,24 @@
 
 Usage
 -----
-  python -m stockmonitor lm           # un run Leroy Merlin (IDF)
-  python -m stockmonitor casto        # un run Castorama (France entière)
-  python -m stockmonitor all          # tous les adapteurs, en séquence
+  python -m stockmonitor lm            # boucle Leroy Merlin (défaut 900 s)
+  python -m stockmonitor casto         # boucle Castorama
+  python -m stockmonitor all           # tous les adapteurs, en séquence
 
-  python -m stockmonitor lm --loop 1800
-  python -m stockmonitor casto --notify-cmd ./notify.sh -v
+  python -m stockmonitor lm --product-ref 12345678 --product-url https://...
+  python -m stockmonitor lm --loop 0   # one-shot
 
-Arguments communs :
-  --data-dir <path>   dossier sorties + cache (defaut: ./data)
-  --loop <sec>        auto-boucle toutes les N secondes
-  --notify-cmd <sh>   commande shell exécutée si restock (env: <PREFIX>_*)
-  -v / --verbose      affiche les statuts inconnus
+Tous les defaults tunables (cadence, stable-rounds, zone, délais…) vivent
+dans config.toml à la racine. La CLI ne garde que l'essentiel.
 
-Arguments spécifiques : voir `python -m stockmonitor <retailer> --help`.
+Arguments
+  --config <path>      config alternatif (defaut: ./config.toml)
+  --data-dir <path>    dossier sorties + cache (defaut: ./data)
+  --loop <sec>         auto-boucle toutes les N sec (0 = one-shot, defaut 900)
+  --notify-cmd <sh>    commande shell exécutée si restock
+  --product-ref <ref>  override produit (EAN / réf catalogue)
+  --product-url <url>  override URL fiche produit
+  -v / --verbose       affiche les statuts inconnus
 """
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ import time
 from pathlib import Path
 
 from .base import ScannerBase
+from .config import load_config
 from .retailers import REGISTRY
 
 
@@ -55,22 +60,27 @@ def _resolve(name: str) -> str | None:
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--data-dir",
-                        default=str(Path(__file__).resolve().parent.parent / "data"),
-                        help="Dossier sorties + cache/token/profil.")
-    parser.add_argument("--loop", type=int, default=0, metavar="SECONDES",
-                        help="Auto-boucle toutes les N secondes (0 = un seul run).")
-    parser.add_argument("--notify-cmd", default=None,
+    parser.add_argument("--config", default=None, metavar="PATH",
+                        help="Chemin vers un config.toml alternatif (defaut: ./config.toml).")
+    parser.add_argument("--data-dir", default=None, metavar="PATH",
+                        help="Dossier sorties + cache/token/profil (defaut: ./data).")
+    parser.add_argument("--loop", type=int, default=None, metavar="SECONDES",
+                        help="Auto-boucle toutes les N sec (0 = one-shot, defaut: 900).")
+    parser.add_argument("--notify-cmd", default=None, metavar="SH",
                         help="Commande shell exécutée si restock "
                              "(env: <PREFIX>_MESSAGE, <PREFIX>_STORES, …).")
-    parser.add_argument("-v", "--verbose", action="store_true",
+    parser.add_argument("--product-ref", default=None, metavar="REF",
+                        help="Override réf/EAN produit (sinon config.toml).")
+    parser.add_argument("--product-url", default=None, metavar="URL",
+                        help="Override URL fiche produit (sinon config.toml).")
+    parser.add_argument("-v", "--verbose", action="store_true", default=None,
                         help="Affiche aussi les statuts inconnus.")
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="stockmonitor",
-        description="Moniteur de stock multi-enseignes (Leroy Merlin, Castorama, …).",
+        description="Moniteur de stock multi-enseignes (Leroy Merlin, Castorama).",
         usage="python -m stockmonitor <retailer> [options]\n"
               "       python -m stockmonitor all [options]",
     )
@@ -95,10 +105,7 @@ def _instance_for(name: str) -> ScannerBase | None:
 
 
 def _canonical_instances() -> list[ScannerBase]:
-    out: list[ScannerBase] = []
-    for name in _canonical_names():
-        out.append(REGISTRY[name]())
-    return out
+    return [REGISTRY[n]() for n in _canonical_names()]
 
 
 # --------------------------------------------------------------------------- #
@@ -108,36 +115,54 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    cfg = load_config(getattr(args, "config", None))
+
+    # Common defaults (quand la CLI n'a rien passé ni le config).
+    _fallback(args, "data_dir", str(Path("data")), cfg.get("common", {}))
+    _fallback(args, "loop", 900, cfg.get("common", {}))
+    _fallback(args, "notify_cmd", "", cfg.get("common", {}))
+    _fallback(args, "verbose", False, cfg.get("common", {}))
     Path(args.data_dir).mkdir(parents=True, exist_ok=True)
 
     if args.retailer == "all":
-        return _run_all(_canonical_instances(), args)
+        return _run_all(_canonical_instances(), args, cfg)
 
     instance = _instance_for(args.retailer)
     if not instance:
         parser.error(f"Enseigne inconnue : {args.retailer}")
-    instance.run_main(args)
+    instance.run_main(args, cfg)
     return 0
 
 
-def _namespace_for_scanner(scanner: ScannerBase, args) -> argparse.Namespace:
-    """Construit un Namespace complet pour `scanner` en mode `all`.
+def _fallback(args, key: str, hard_default, cfg_section: dict) -> None:
+    """Applique la priorité : CLI > config.toml > default codé."""
+    if getattr(args, key, None) is not None:
+        return
+    val = cfg_section.get(key)
+    if val is not None:
+        setattr(args, key, val)
+        return
+    setattr(args, key, hard_default)
 
-    Le parser `all` ne contient que les args communs ; on complète avec les
-    defaults spécifiques au scanner. Les valeurs communes fournies par
-    l'utilisateur (--data-dir, --loop, --notify-cmd, --verbose) sont propagées.
+
+def _namespace_for_scanner(scanner: ScannerBase, args, cfg: dict) -> argparse.Namespace:
+    """Construit un Namespace pour `scanner` en mode `all`.
+
+    On repart d'un Namespace vide (juste les overrides CLI communs), puis on
+    laisse apply_config() remplir le reste (defaults codés + config.toml).
     """
-    p = argparse.ArgumentParser(add_help=False)
-    _add_common_args(p)
-    scanner.add_arguments(p)
-    ns = p.parse_args([])  # defaults spécifiques + communs
-    # Override avec les valeurs communes réellement passées par l'utilisateur.
-    for k, v in vars(args).items():
-        setattr(ns, k, v)
+    ns = argparse.Namespace()
+    # On propage uniquement les champs communs réellement passés en CLI
+    # (les autres viendront de config via apply_config).
+    for k in ("config", "data_dir", "loop", "notify_cmd", "product_ref",
+              "product_url", "verbose"):
+        if hasattr(args, k):
+            setattr(ns, k, getattr(args, k))
+    scanner.apply_config(ns, cfg)
     return ns
 
 
-def _run_all(instances: list[ScannerBase], args) -> int:
+def _run_all(instances: list[ScannerBase], args, cfg) -> int:
     """Lance toutes les enseignes en séquence ; boucle si --loop > 0."""
     names = ", ".join(s.RETAILER_NAME for s in instances)
     print(f"[{_ts()}] stockmonitor · {len(instances)} enseignes : {names}")
@@ -146,9 +171,9 @@ def _run_all(instances: list[ScannerBase], args) -> int:
         rc = 0
         for i, s in enumerate(instances):
             if i:
-                print()  # séparateur entre enseignes
+                print()
             try:
-                ns = _namespace_for_scanner(s, args)
+                ns = _namespace_for_scanner(s, args, cfg)
                 s.run_once(ns)
             except Exception as e:
                 rc = 1
@@ -157,8 +182,7 @@ def _run_all(instances: list[ScannerBase], args) -> int:
 
     if not (args.loop and args.loop > 0):
         print()
-        rc = _one_pass()
-        return rc
+        return _one_pass()
 
     print(f"\nMode boucle toutes les {args.loop}s. Ctrl-C pour arrêter.")
     try:
