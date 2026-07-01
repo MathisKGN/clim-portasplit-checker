@@ -33,7 +33,6 @@ from ..common import (
     aggregate,
     ean_from_url,
     http_get,
-    sleep_between,
     ts,
 )
 from ..seeds_casto_france import SEEDS_CASTO_FRANCE
@@ -323,7 +322,7 @@ class CastoScanner(ScannerBase):
                 errors += 1
                 self._emit("seed_blocked", index=i, total=total, label=label,
                            status=str(e))
-                sleep_between(args, long=True)
+                self._pause(args, long=True)
                 continue
 
             used += 1
@@ -337,7 +336,7 @@ class CastoScanner(ScannerBase):
             if all_stores and stable >= args.stable_rounds:
                 break
             if i < len(seeds):
-                sleep_between(args)
+                self._pause(args)
 
         in_stock = sum(1 for s in all_stores.values() if s.get("restock"))
         self._emit("scan_done", total_stores=len(all_stores), in_stock=in_stock,

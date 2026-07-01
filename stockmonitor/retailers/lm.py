@@ -26,7 +26,6 @@ from ..common import (
     aggregate,
     normalize_text,
     order_core_first,
-    sleep_between,
     ts,
 )
 
@@ -315,9 +314,9 @@ class LmScanner(ScannerBase):
                 if stable_rounds and all_stores and stable >= stable_rounds:
                     break
             # Cadence large (2-5 s par défaut) : un humain ne scanne pas 36
-            # magasins en 3 min. sleep_between respecte --min/max-delay.
+            # magasins en 3 min. _pause émet un event pour le countdown live.
             if i < len(seeds):
-                sleep_between(args)
+                self._pause(args)
         in_stock = sum(1 for s in all_stores.values() if s.get("restock"))
         self._emit("scan_done", total_stores=len(all_stores), in_stock=in_stock,
                    blocked=blocked, completed=blocked == 0, seeds_used=total)
