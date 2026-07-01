@@ -101,7 +101,43 @@ def _instance_for(name: str) -> ScannerBase | None:
     canonical = _resolve(name)
     if not canonical:
         return None
-    return REGISTRY[canonical]()
+    inst = REGISTRY[canonical]()
+    return inst
+
+
+def _default_event_handler(scanner: ScannerBase, args) -> "callable | None":
+    """Handler d'events qui reimprime la progression quand -v (mode CLI legacy).
+
+    Les scanners n'émettent plus de print() directement : sans handler, ils
+    sont silencieux. En mode CLI, on branche ce handler pour restaurer le
+    comportement verbeux d'avant (lignes `seed X/Y : N magasins (+M)`).
+    """
+    verbose = getattr(args, "verbose", False)
+    if not verbose:
+        return None
+
+    def handler(event_type: str, payload: dict) -> None:
+        et = event_type
+        if et == "scan_start":
+            print(f"  scan {payload.get('total_seeds', 0)} points "
+                  f"({payload.get('zone', '?')})")
+        elif et == "warmup":
+            print(f"  warmup : {payload.get('detail') or payload.get('phase')}")
+        elif et == "seed_done":
+            print(f"    {payload.get('index')}/{payload.get('total')} "
+                  f"{payload.get('label')} : {payload.get('found')} magasins "
+                  f"(+{payload.get('new')})")
+        elif et == "seed_blocked":
+            print(f"    {payload.get('index')}/{payload.get('total')} "
+                  f"{payload.get('label')} bloqué (status={payload.get('status')})")
+        elif et == "remint":
+            print(f"    [remint] {payload.get('reason')}")
+        elif et == "online":
+            avail = payload.get("home_delivery")
+            print(f"  🌐 en ligne : {avail}")
+        elif et == "scan_done":
+            pass
+    return handler
 
 
 def _canonical_instances() -> list[ScannerBase]:
@@ -130,6 +166,9 @@ def main(argv: list[str] | None = None) -> int:
     instance = _instance_for(args.retailer)
     if not instance:
         parser.error(f"Enseigne inconnue : {args.retailer}")
+    handler = _default_event_handler(instance, args)
+    if handler:
+        instance.set_event_handler(handler)
     instance.run_main(args, cfg)
     return 0
 
@@ -174,6 +213,9 @@ def _run_all(instances: list[ScannerBase], args, cfg) -> int:
                 print()
             try:
                 ns = _namespace_for_scanner(s, args, cfg)
+                handler = _default_event_handler(s, ns)
+                if handler:
+                    s.set_event_handler(handler)
                 s.run_once(ns)
             except Exception as e:
                 rc = 1
