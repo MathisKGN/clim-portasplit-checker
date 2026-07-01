@@ -13,3 +13,7 @@ playwright==1.50.0
 
 # Castorama / Darty / Amazon : API JSON, aucun navigateur requis (a priori)
 requests>=2.31
+
+# Interface interactive + rendu temps réel (python -m stockmonitor sans args)
+rich>=13.7
+questionary>=2.1
