@@ -385,9 +385,14 @@ def make_handler(state: dict, scanner: ScannerBase):
 def _build_namespace(overrides: dict, cfg: dict) -> argparse.Namespace:
     """Construit un Namespace vierge puis laisse apply_config remplir."""
     ns = argparse.Namespace()
-    for k in ("config", "data_dir", "loop", "notify_cmd", "product_ref",
-              "product_url", "verbose"):
-        setattr(ns, k, overrides.get(k))
+    # Champs communs + overrides spécifiques (zone/wide pour LM, …).
+    keys = ("config", "data_dir", "loop", "notify_cmd", "product_ref",
+            "product_url", "verbose", "zone", "wide")
+    for k in keys:
+        if k in overrides:
+            setattr(ns, k, overrides[k])
+        else:
+            setattr(ns, k, None)
     return ns
 
 
@@ -430,7 +435,11 @@ def _run_with_live(scanner: ScannerBase, ns: argparse.Namespace,
     state["warmup_started_at"] = None
 
     dash = Dashboard(state)
-    console = Console()  # ancré sur le vrai stdout AVANT redirection
+    # On épingle file=sys.stdout ICI (avant redirection) : Rich résout
+    # `sys.stdout` dynamiquement à chaque write quand file=None, donc sans ça
+    # la redirection vers _NullStdout étoufferait aussi le rafraîchissement
+    # du Live (dashboard jamais mis à jour pendant le scan).
+    console = Console(file=sys.stdout)
     scanner.set_event_handler(make_handler(state, scanner))
 
     with Live(dash, console=console, refresh_per_second=4, transient=False,
@@ -458,7 +467,7 @@ def _countdown(state: dict, seconds: int) -> None:
     state["phase"] = "countdown"
     state["next_at"] = dt.datetime.now() + dt.timedelta(seconds=seconds)
     dash = Dashboard(state)
-    console = Console()
+    console = Console(file=sys.stdout)
     with Live(dash, console=console, refresh_per_second=1, transient=False,
               screen=False) as live:
         end = state["next_at"]
