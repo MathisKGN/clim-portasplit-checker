@@ -59,28 +59,55 @@ def _pick_retailer() -> str | None:
     ).ask()
 
 
-def _pick_lm_zone() -> tuple[str, bool] | None:
-    """Renvoie (zone, wide)."""
+def _pick_lm_area() -> tuple[list, str] | None:
+    """Demande un code postal + un rayon, calcule les seeds à la volée.
+
+    Renvoie (seeds, zone_label) où seeds est une liste de (label, lat, lon).
+    Renvoie None si l'utilisateur annule.
+    """
     import questionary
-    choice = questionary.select(
-        "Quelle zone pour Leroy Merlin ?",
-        choices=[
-            questionary.Choice("IDF (cœur, ~36 magasins, rapide)", value="idf_core"),
-            questionary.Choice("IDF élargi (Reims/Troyes/Orléans…)", value="idf_wide"),
-            questionary.Choice("Paris 200 km (~55 magasins ciblés)", value="paris200"),
-            questionary.Choice("France entière (~146 magasins, long)", value="france"),
-        ],
-        use_arrow_keys=True,
+    from rich.console import Console
+    from .seeds_dynamic import geocode_cp, compute_seeds
+
+    console = Console()
+
+    cp = questionary.text(
+        "Ton code postal (autour duquel scanner) ?",
+        validate=lambda s: (s.strip().isdigit() and len(s.strip()) == 5)
+        or "Code postal invalide (5 chiffres, ex. 59000)",
     ).ask()
-    if choice is None:
+    if cp is None:
         return None
-    if choice == "idf_core":
-        return "idf", False
-    if choice == "idf_wide":
-        return "idf", True
-    if choice == "paris200":
-        return "paris200", False
-    return "france", False
+
+    radius = questionary.text(
+        "Rayon de scan en km (entre 5 et 700) ?",
+        default="100",
+        validate=lambda s: (s.strip().isdigit() and 5 <= int(s.strip()) <= 700)
+        or "Entre un nombre entre 5 et 700",
+    ).ask()
+    if radius is None:
+        return None
+    radius_km = int(radius.strip())
+
+    console.print(f"  [dim]Géolocalisation du {cp.strip()}…[/]")
+    center = geocode_cp(cp.strip())
+    if center is None:
+        console.print("  [red]Code postal introuvable (ou pas de réseau).[/] "
+                      "Réessaie.")
+        return _pick_lm_area()
+
+    seeds, n_stores = compute_seeds(center, radius_km)
+    if not seeds:
+        console.print(
+            f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "
+            f"{radius_km} km.[/] Élargis le rayon.")
+        return _pick_lm_area()
+
+    label = f"{cp.strip()} · {radius_km} km ({n_stores} magasins)"
+    console.print(
+        f"  [green]✓[/] {n_stores} magasins couverts par "
+        f"[bold]{len(seeds)} point(s)[/] de scan.")
+    return seeds, label
 
 
 def _pick_product(default_url: str) -> str | None:
@@ -205,7 +232,6 @@ class Dashboard:
                       header_style="bold")
         table.add_column("Magasin", overflow="fold")
         table.add_column("État", width=4)
-        table.add_column("Distance", width=9)
         table.add_column("Détail", overflow="fold", ratio=1)
 
         stores = s.get("stores", {})
@@ -224,8 +250,6 @@ class Dashboard:
             name = st.get("name", st.get("id", "?"))
             if st.get("restock"):
                 name = Text(name, style="bold")
-            dist = st.get("distance_km")
-            dist_str = f"{dist} km" if dist is not None else "—"
             detail = (st.get("status_text") or st.get("stock_level")
                       or st.get("cc_message") or "")
             qty = st.get("quantity")
@@ -234,7 +258,6 @@ class Dashboard:
             table.add_row(
                 name,
                 Text(icon, style=style),
-                Text(dist_str, style="dim"),
                 Text(detail, style=style if st.get("state") == "IN" else "dim"),
             )
             shown += 1
@@ -387,7 +410,8 @@ def _build_namespace(overrides: dict, cfg: dict) -> argparse.Namespace:
     ns = argparse.Namespace()
     # Champs communs + overrides spécifiques (zone/wide pour LM, …).
     keys = ("config", "data_dir", "loop", "notify_cmd", "product_ref",
-            "product_url", "verbose", "zone", "wide")
+            "product_url", "verbose", "zone", "wide",
+            "custom_seeds", "zone_label")
     for k in keys:
         if k in overrides:
             setattr(ns, k, overrides[k])
@@ -521,10 +545,11 @@ def main() -> int:
     # 3. Zone (LM uniquement) + produit
     for sc in scanners:
         if sc.CONFIG_KEY == "lm":
-            zone_pick = _pick_lm_zone()
-            if zone_pick is None:
+            area = _pick_lm_area()
+            if area is None:
                 return 1
-            overrides["zone"], overrides["wide"] = zone_pick
+            overrides["custom_seeds"], overrides["zone_label"] = area
+            overrides["zone"] = area[1]
             break
 
     # Produit : on prend l'URL par défaut du premier scanner concerné.

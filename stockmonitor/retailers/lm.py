@@ -209,6 +209,15 @@ class LmScanner(ScannerBase):
 
     # --- Sélection des seeds --------------------------------------------- #
     def _select_seeds(self, args):
+        # Seeds calculés à la volée (mode interactif : code postal + rayon).
+        # Prioritaire sur les zones prédéfinies quand ils sont fournis.
+        custom = getattr(args, "custom_seeds", None)
+        if custom:
+            seeds = list(custom)
+            zone = getattr(args, "zone_label", None) or f"zone perso ({len(seeds)} seeds)"
+            if args.max_seeds and args.max_seeds > 0:
+                seeds = seeds[: args.max_seeds]
+            return seeds, zone
         zone_name = args.zone
         if zone_name == "france" and SEEDS_FRANCE_FULL:
             seeds = list(SEEDS_FRANCE_FULL)
