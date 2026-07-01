@@ -53,9 +53,10 @@ python -m stockmonitor
 Ensuite, **tu n'as qu'à répondre aux questions** avec les flèches ⬆️⬇️ du clavier et la touche **Entrée** :
 
 1. **Quelle enseigne ?** → Leroy Merlin, Castorama, ou les deux.
-2. **Quelle zone ?** → Île-de-France, Paris 200 km, France entière…
-3. **Quel produit ?** → garde celui par défaut (Entrée), ou colle l'adresse d'une autre fiche produit.
-4. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 15 / 30 / 60 min.
+2. **Ton code postal ?** → tape ton code postal (5 chiffres, ex. `59000`).
+3. **Quel rayon ?** → un nombre de km entre 5 et 700 autour de chez toi. Le programme trouve tout seul les magasins dans ce périmètre et calcule le minimum de points à scanner.
+4. **Quel produit ?** → garde celui par défaut (Entrée), ou colle l'adresse d'une autre fiche produit.
+5. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 15 / 30 / 60 min.
 
 Et c'est parti : un tableau en direct affiche les magasins et lesquels ont du stock. 🟢
 
