@@ -1,13 +1,11 @@
 # --- Moniteur de stock multi-enseignes (stockmonitor/) ----------------------
-# Leroy Merlin (défaut) : DataDome contourné en HTTP pur (curl_cffi) pour le
-#   scan, + Camoufox (Firefox anti-détection) pour résoudre le challenge
-#   interstitiel (device-check DataDome) quand l'IP est encore inconnue.
-#   Le cookie trusted du solve est réinjecté dans la session curl_cffi.
+# Leroy Merlin (défaut) : scan en HTTP pur (curl_cffi), avec un warmup Camoufox
+#   pour établir la session. Les cookies du warmup sont réutilisés par curl_cffi.
 curl_cffi>=0.7
 beautifulsoup4>=4.12
 lxml>=5.0
-# Camoufox : navigateur anti-détection (Firefox 135 build). Sert pour le solve
-# interstitiel DataDome (mode HTTP par défaut) ET pour le fallback --use-camoufox.
+# Camoufox : navigateur utilisé pour le warmup (mode HTTP par défaut) et pour
+# le fallback --use-camoufox.
 # Camoufox 0.4.11 est incompatible avec Playwright >= 1.51
 # (erreur "viewport.isMobile not described in this scheme"). On épingle 1.50.0.
 camoufox[geoip]>=0.4.11

@@ -26,3 +26,4 @@ tags*.js
 *.html
 DATADOME_RECON.md
 tools/recon_*.py
+tools/*_probe.py

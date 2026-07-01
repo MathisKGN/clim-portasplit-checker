@@ -1,10 +1,10 @@
 """Castorama — adapteur requests (API JSON Kingfisher + BFF livraison).
 
-Contrairement à Leroy Merlin (DataDome -> Camoufox), castorama.fr sert sa fiche
-produit à une simple requête serveur **et** son stock magasin vient d'une API
-mobile JSON propre. Aucun navigateur requis — un `requests` suffit.
+Contrairement à Leroy Merlin, castorama.fr sert sa fiche produit à une simple
+requête serveur **et** son stock magasin vient d'une API mobile JSON propre.
+Aucun navigateur requis — un `requests` suffit.
 
-Mécanique (rétro-ingénierée) :
+Mécanique :
   1. Token d'API (clé statique ~80 car.) extraite du HTML SSR de la fiche produit,
      ancrée sur `stores/CAFR`.
   2. Stock par magasin :

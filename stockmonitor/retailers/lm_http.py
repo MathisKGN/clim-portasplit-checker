@@ -1,21 +1,10 @@
-"""Leroy Merlin — transport HTTP pur (zéro navigateur pour le scan).
+"""Leroy Merlin — transport HTTP pur (sans navigateur pour le scan).
 
-leroymerlin.fr est protégé par DataDome. La stratégie éprouvée :
-
-  1. curl_cffi (impersonate firefox135) émet tout le HTTP avec un JA3 Firefox.
-  2. Warmup : 2x GET homepage + GET fiche produit. Le cookie datadome posé
-     par ces GET document est trusté par DataDome (le JA3 curl_cffi firefox135
-     est cohérent avec le parcours navigateur). PAS besoin de solve Camoufox
-     en warmup : le solve du challenge interstitiel renvoie systematiquement
-     `view:"captcha"` (= refusé) et nuit au score IP sans gain de trust.
-  3. Avant chaque XHR stock, on re-GET la fiche produit (comportement humain).
-     En cas de 403, on re-GET et on retente : le trust se construit
-     progressivement (DataDome renforce le cookie à chaque interaction document).
-  4. L'endpoint stock répond 200 avec le fragment HTML habituel, parsé par
-     le même _parse_stores() que le chemin Camoufox.
-
-Un seul mint sert ensuite plusieurs seeds (mint-once -> scan-many) ; on ne
-re-résout jamais un challenge (le solve nuit au score IP).
+Une session HTTP (curl_cffi) interroge l'endpoint `store-search-result` pour
+récupérer le stock par magasin. Un warmup initial charge la homepage + la
+fiche produit pour établir une session valide, puis les requêtes stock sont
+émises. La réponse (fragment HTML) est parsée par le même _parse_stores() que
+le chemin Camoufox. Un seul warmup sert ensuite plusieurs seeds.
 """
 from __future__ import annotations
 
@@ -26,9 +15,8 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-# Cooldown après IP burned : on arrête complètement de solliciter le site
-# (même le warmup) pendant ce délai, pour laisser le score DataDome se
-# refroidir au lieu de le réescalader à chaque relance du script.
+# Après une série d'échecs, on met la session en pause pendant ce délai
+# plutôt que de re-solliciter le site immédiatement à chaque relance.
 BURNED_COOLDOWN_S = 6 * 3600
 
 STOCK_URL = (
@@ -40,8 +28,7 @@ NAV_HEADERS = {
     "accept-language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
-# Accept réel d'un XHR axios vers l'endpoint stock (cohérent avec le chemin
-# Camoufox — était "*/*" avant, ce qui dénotait avec le navigateur réel).
+# Header Accept d'un XHR axios vers l'endpoint stock.
 XHR_ACCEPT = "application/json, text/plain, */*"
 
 
@@ -51,14 +38,14 @@ def _require_runtime() -> None:
         from curl_cffi import requests as creq  # noqa: F401
     except ImportError:
         sys.exit(
-            "curl_cffi requis pour le mode HTTP (empreinte TLS Firefox).\n"
+            "curl_cffi requis pour le mode HTTP.\n"
             "Installe : pip install curl_cffi\n"
             "ou lance avec --use-camoufox."
         )
 
 
 class LmHttpSession:
-    """Session DataDome-aware : warmup + fetch stock, sans navigateur."""
+    """Session HTTP : warmup + fetch stock, sans navigateur."""
 
     def __init__(self, args):
         from curl_cffi import requests as creq  # import tardif (dépendance optionnelle)
@@ -69,18 +56,17 @@ class LmHttpSession:
         self.verbose = getattr(args, "verbose", False)
         self.s = creq.Session(impersonate=self.impersonate, timeout=30)
         self.burned: bool = False
-        # Warmup : on ne tape l'endpoint stock qu'après avoir réellement visité
-        # homepage + fiche produit (sinon DataDome challenge sur le 1er hit,
-        # car sec-fetch-site: same-origin + referer sont des mensonges).
+        # Warmup : on ne tape l'endpoint stock qu'après avoir visité homepage +
+        # fiche produit (l'endpoint attend une session déjà établie).
         self.warmed: bool = False
-        # État disque : cookie trusted + fenêtre burned, partagés entre lancements
+        # État disque : cookies + fenêtre de pause, partagés entre lancements
         # successifs du script (un process par cycle de scan). Sans ça, chaque
-        # lancement refait un warmup à froid, ce qui sollicite DataDome.
+        # lancement referait un warmup à froid.
         self.state_path = Path(args.data_dir) / "lm_http_state.json"
         self.burned_until: float | None = None
         self._load_state()
 
-    # --- état disque (cookie + cooldown burned, entre lancements) -------- #
+    # --- état disque (cookies + pause, entre lancements) ----------------- #
     def _load_state(self) -> None:
         try:
             state = json.loads(self.state_path.read_text())
@@ -92,7 +78,7 @@ class LmHttpSession:
             self.burned_until = burned_until
             if self.verbose:
                 remaining = int(burned_until - time.time())
-                print(f"  session: IP en cooldown ({remaining}s restantes), "
+                print(f"  session: en pause ({remaining}s restantes), "
                       f"on ne sollicite pas le site.")
             return
         for name, value in (state.get("cookies") or {}).items():
@@ -101,19 +87,19 @@ class LmHttpSession:
             except Exception:
                 pass
         if state.get("warmed") and state.get("cookies"):
-            # Cookie trusted déjà en jar -> on saute le warmup réseau (homepage
-            # + fiche produit) qui ne sert qu'à amorcer un cookie absent.
+            # Cookies déjà en jar -> on saute le warmup réseau (homepage
+            # + fiche produit) qui ne sert qu'à amorcer une session absente.
             self.warmed = True
             if self.verbose:
-                print("  session: cookie trusted réutilisé depuis le disque, warmup sauté.")
+                print("  session: cookies réutilisés depuis le disque, warmup sauté.")
 
     def _save_state(self) -> None:
         """Écrit cookies + warmed + burned_until (si fixé) sur disque.
 
         Toujours réémettre `self.burned_until` ici (pas juste au moment où on
-        le fixe) : sinon un appel ultérieur sans cet argument écraserait le
-        cooldown déjà posé et un prochain lancement re-solliciterait le site
-        à froid pendant la fenêtre qu'on voulait justement éviter.
+        le fixe) : sinon un appel ultérieur sans cet argument écraserait la
+        fenêtre de pause déjà posée et un prochain lancement re-solliciterait
+        le site pendant la fenêtre qu'on voulait éviter.
         """
         cookies = {}
         try:
@@ -128,38 +114,30 @@ class LmHttpSession:
         except OSError:
             pass
 
-    # --- warmup ( warmup-once, avant mint/scan) -------------------------- #
+    # --- warmup (une fois, avant mint/scan) ------------------------------ #
     def _warmup(self) -> None:
-        """Pré-charge la session avant tout XHR stock, en 2 phases.
+        """Pré-charge la session avant toute requête stock, en 2 phases.
 
-        Phase 1 — Camoufox (vrai Firefox) visite homepage + fiche produit.
-          Le tags.js DataDome (proxy first-party bot.cdn.adeo.cloud/tags.js)
-          s'exécute dans le vrai moteur Gecko et envoie son beacon POST /js/
-          au complet. DataDome valide la télémétrie (mouse/timing/events) et
-          "promeut" le cookie datadome en état trusted full. C'est la
-          différence clé vs curl_cffi seul (qui n'exécute pas le JS → aucun
-          beacon jamais envoyé → trust partiel → 403 stochastiques).
+        Phase 1 — Camoufox (navigateur) visite homepage + fiche produit et
+          laisse les scripts de la page s'exécuter normalement, ce qui établit
+          les cookies de session.
 
-        Phase 2 — curl_cffi (JA3 firefox135 ≈ Firefox natif) récupère les
-          cookies posés par Camoufox et les réutilise pour ses XHR stock. Le
-          JA3 cohérent entre Camoufox et curl_cffi firefox135 garantit que
-          DataDome lié le cookie au JA3 ne rejette pas le trust.
+        Phase 2 — curl_cffi récupère les cookies posés par Camoufox et les
+          réutilise pour ses requêtes stock.
 
-        Anti-grillade : on ne lance Camoufox qu'UNE fois au démarrage (warmup).
-        Les cycles de scan suivants (mode --loop) ne relancent pas Camoufox :
-        le trust accumulé par le premier beacon suffit, et curl_cffi le
-        maintient par ses GET document répétés.
+        Camoufox n'est lancé qu'UNE fois au démarrage ; les cycles de scan
+        suivants (mode --loop) réutilisent la session via curl_cffi seul.
         """
         if self.warmed or self.burned:
             return
         if self.verbose:
-            print("  warmup : Camoufox (tags.js -> beacon /js/)…")
+            print("  warmup : Camoufox…")
         try:
             self._camoufox_warmup()
         except Exception as e:
             if self.verbose:
                 print(f"    [camoufox warmup] erreur: {e!r}, fallback curl_cffi seul")
-            # Fallback : warmup curl_cffi seul (trust partiel, 403 probable)
+            # Fallback : warmup curl_cffi seul (session partielle)
             try:
                 self.s.get("https://www.leroymerlin.fr/", headers=NAV_HEADERS, timeout=30)
                 self.s.get(self.product_url, headers=NAV_HEADERS, timeout=30)
@@ -168,10 +146,10 @@ class LmHttpSession:
         self.warmed = True
 
     def _camoufox_warmup(self) -> None:
-        """Lance Camoufox pour laisser le tags.js DataDome envoyer son beacon.
+        """Lance Camoufox pour établir la session sur les pages du site.
 
-        Visite homepage + fiche produit, attend 6-10 s que le tags.js déclenche
-        le POST /js/ (télémétrie), puis transfère les cookies vers curl_cffi.
+        Visite homepage + fiche produit, laisse les scripts de la page
+        s'exécuter quelques secondes, puis transfère les cookies vers curl_cffi.
         """
         from camoufox.sync_api import Camoufox
         import tempfile
@@ -184,7 +162,7 @@ class LmHttpSession:
             captured: dict = {"beacons": 0, "cookies": {}}
             def _on_request(req):
                 if "/js/" in req.url and req.method == "POST":
-                    captured["beacons"] += 1
+                    captured["beacons"] += 1  # compteur de diagnostic
             page.on("request", _on_request)
             try:
                 page.goto("https://www.leroymerlin.fr/",
@@ -197,8 +175,7 @@ class LmHttpSession:
                           wait_until="domcontentloaded", timeout=45000)
             except Exception:
                 pass
-            # Attendre le beacon /js/ (max 8 s) : le tags.js l'envoie après
-            # quelques secondes d'observation des events.
+            # Laisser la page finir de charger ses scripts (max 8 s).
             deadline = time.time() + 8
             while time.time() < deadline and captured["beacons"] == 0:
                 page.wait_for_timeout(200)
@@ -212,16 +189,15 @@ class LmHttpSession:
                     except Exception:
                         pass
             if self.verbose:
-                print(f"    [camoufox warmup] beacons=/js/ x{captured['beacons']} "
+                print(f"    [camoufox warmup] beacons x{captured['beacons']} "
                       f"cookies={list(captured['cookies'])}")
 
     def _refetch_document(self):
-        """Re-GET la fiche produit entre deux XHR stock (comportement humain).
+        """Re-GET la fiche produit entre deux requêtes stock.
 
-        DataDome consomme le trust à chaque XHR : après 1 hit XHR, le score se
-        dégrade si on n'a pas rechargé une page HTML. Un GET de la fiche produit
-        juste avant le prochain XHR simule un vrai parcours utilisateur et
-        renouvelle le trust. À appeler avant chaque _stock().
+        On recharge la page HTML de la fiche produit juste avant la requête
+        stock suivante, pour rester cohérent avec un parcours de navigation
+        classique. À appeler avant chaque _stock().
         """
         try:
             self.s.get(self.product_url, headers=NAV_HEADERS, timeout=30)
@@ -230,11 +206,9 @@ class LmHttpSession:
 
     # --- requêtes ---------------------------------------------------------- #
     def _stock(self, lat, lon):
-        # On NE set pas `cookie` à la main : ça écrase la jar curl_cffi qui
-        # contient les cookies de session LM (warmup) + le datadome trusted
-        # (posé par le POST /interstitial/). DataDome voit un cookie datadome
-        # seul = flagrant (pas de cookies de navigation) => 403.
-        # curl_cffi envoie tout automatiquement.
+        # On ne set pas `cookie` à la main : ça écraserait la jar curl_cffi qui
+        # contient déjà tous les cookies de session posés au warmup. curl_cffi
+        # les envoie automatiquement.
         sh = {**NAV_HEADERS, "accept": XHR_ACCEPT, "referer": self.product_url,
               "origin": "https://www.leroymerlin.fr",
               "sec-fetch-dest": "empty", "sec-fetch-mode": "cors", "sec-fetch-site": "same-origin"}
@@ -242,23 +216,20 @@ class LmHttpSession:
 
     # --- API publique ------------------------------------------------------ #
     def fetch_stock(self, lat, lon, max_rounds: int = 4):
-        """Renvoie (status, body) pour un seed, avec retry sur 403.
+        """Renvoie (status, body) pour un seed, avec retry sur erreur.
 
-        Le trust vient des GET document répétés. Avant chaque XHR stock, on
-        re-GET la fiche produit 2x (au lieu d'une fois) pour renforcer le
-        trust et accélérer son établissement. En cas de 403, on re-GET et
-        on retente : le trust se construit progressivement.
+        Avant chaque requête stock, on re-GET la fiche produit. En cas
+        d'échec, on re-GET et on retente sur plusieurs tours.
         """
         r = None
         for attempt in range(max_rounds):
-            # 1x GET document avant le XHR stock pour préserver le trust.
-            # Le trust principal vient du beacon /js/ envoyé par Camoufox en
-            # warmup ; le GET document suffit à le renouveler à chaque appel.
+            # GET de la fiche produit avant la requête stock, pour rester
+            # cohérent avec un parcours de navigation.
             self._refetch_document()
             time.sleep(random.uniform(0.5, 1.0))
             r = self._stock(lat, lon)
             if r.status_code == 200 and "m-store-search-result" in r.text:
-                self._save_state()  # cookie trusted confirmé -> réutilisable au run suivant
+                self._save_state()  # session confirmée -> réutilisable au run suivant
                 return 200, r.text
             if self.verbose and attempt < max_rounds - 1:
                 print(f"    [{lat:.4f},{lon:.4f}] attempt {attempt+1}/{max_rounds} "

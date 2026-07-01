@@ -1,9 +1,8 @@
-"""Leroy Merlin — adapteur Camoufox (anti-DataDome).
+"""Leroy Merlin — adapteur Camoufox.
 
-Le site leroymerlin.fr est protégé par DataDome. Les requêtes nues sont bloquées
-(503 / challenge). On pilote un navigateur réel via Camoufox (Firefox
-anti-détection, fingerprint cohérent), qui émet la XHR de stock depuis le
-contexte de la page (same-origin) sans intervention humaine.
+Les requêtes HTTP nues vers leroymerlin.fr ne suffisent pas toujours. On pilote
+un navigateur via Camoufox, qui émet la requête de stock depuis le contexte de
+la page (same-origin) sans intervention humaine.
 
 Endpoint stock (fragment HTML, pas JSON) :
   GET /store-header-module/services/contextlayer/store-search-result
@@ -203,20 +202,19 @@ def looks_blocked(status: int, body: str) -> bool:
     if "m-store-search-result" in body:
         return False
     low = body.lower()
-    # 200 + signature DataDome/captcha = bloqué
+    # 200 mais réponse d'interstitiel au lieu du fragment attendu = bloqué
     if "datadome" in low or "captcha" in low:
         return True
     # 200 + page HTML générique (login, redirect…) = pas le bon endpoint
     if "<html" in low:
         return True
     # 200 + body vide / non-HTML : on ne considère PAS comme bloqué
-    # (réponse légitime mais sans magasin à <= 30 km). Évite de déclencher
-    # un challenge-resolve inutile.
+    # (réponse légitime mais sans magasin à <= 30 km).
     return False
 
 
 # --------------------------------------------------------------------------- #
-# Navigateur (Camoufox — Firefox anti-détection)
+# Navigateur (Camoufox)
 # --------------------------------------------------------------------------- #
 @contextmanager
 def _open_browser(args):
@@ -329,16 +327,16 @@ class LmScanner(ScannerBase):
                             help="Arrêt après N points sans nouveau magasin (mode lent).")
         parser.add_argument("--block-images", dest="block_images", action="store_true", default=True)
         parser.add_argument("--no-block-images", dest="block_images", action="store_false")
-        # --- Transport : défaut = HTTP pur (curl_cffi + device-check DataDome
-        #     résolu via Camoufox), zéro navigateur pour le scan lui-même.
-        #     --use-camoufox rebascule sur l'ancien chemin Firefox pour tout.
+        # --- Transport : défaut = HTTP pur (curl_cffi + warmup Camoufox),
+        #     zéro navigateur pour le scan lui-même. --use-camoufox rebascule
+        #     sur le chemin navigateur pour tout.
         parser.add_argument("--use-camoufox", dest="use_camoufox", action="store_true",
                             default=False,
                             help="Forcer le navigateur Camoufox (fallback). "
                                  "Défaut: HTTP pur sans navigateur.")
         parser.add_argument("--impersonate", default="firefox135",
-                            help="Empreinte TLS curl_cffi pour le mode HTTP (défaut "
-                                 "firefox135 ; doit rester une cible Firefox récente).")
+                            help="Profil TLS curl_cffi pour le mode HTTP "
+                                 "(défaut firefox135).")
 
     # --- Contexte (HTTP par défaut, Camoufox en fallback) ------------------ #
     @contextmanager
@@ -389,7 +387,7 @@ class LmScanner(ScannerBase):
             return self._scan_http(ctx, args)
         page = self._new_page(ctx, args)
         # On charge la fiche produit une fois pour stabiliser le contexte
-        # (cookies de session, fingerprint). Pas de clearance manuelle.
+        # (cookies de session).
         try:
             page.goto(args.product_url, wait_until="domcontentloaded", timeout=60000)
         except Exception:
@@ -441,9 +439,8 @@ class LmScanner(ScannerBase):
                 new = aggregate(found, all_stores)
                 if verbose:
                     print(f"    {i}/{len(seeds)} {label} : {len(found)} magasins (+{new})")
-            # Cadence courte : le _refetch_document dans fetch_stock fait déjà
-            # le travail de trust (2x GET document + pauses), pas besoin
-            # d'attente supplémentaire longue entre seeds.
+            # Cadence courte : fetch_stock fait déjà un GET document + pauses
+            # avant chaque requête, pas besoin d'attente longue entre seeds.
             if i < len(seeds):
                 time.sleep(random.uniform(1.0, 2.0))
         return {"stores": all_stores, "blocked": blocked, "seeds": len(seeds),
