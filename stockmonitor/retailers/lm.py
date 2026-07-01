@@ -128,10 +128,6 @@ def _classify(status_text: str, badge_classes: str):
         return "UNKNOWN", False
     if ("--green" in b) or ("--orange" in b) or any(p in s for p in IN_PATTERNS):
         return "IN", True
-
-    has_signal = bool(s.strip()) or "stock-status" in b
-    if not has_signal:
-        return "UNKNOWN", False
     return "UNKNOWN", False
 
 
@@ -288,9 +284,6 @@ class LmScanner(ScannerBase):
     def store_url(self, store: dict) -> str:
         return f"https://www.leroymerlin.fr/magasins/{store['slug']}.html"
 
-    def sort_stores(self, stores):
-        return sorted(stores, key=lambda x: x.get("name", ""))
-
     def csv_header(self):
         return ["slug", "magasin", "etat", "statut_texte", "badge", "distance_km", "url"]
 
@@ -348,9 +341,6 @@ class LmScanner(ScannerBase):
             from .lm_http import open_http_context
             with open_http_context(args) as sess:
                 yield sess
-
-    def prepare_context(self, ctx, args):
-        pass
 
     def _new_page(self, ctx, args):
         page = ctx.new_page()

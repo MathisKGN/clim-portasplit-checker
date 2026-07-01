@@ -15,10 +15,6 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-# Après une série d'échecs, on met la session en pause pendant ce délai
-# plutôt que de re-solliciter le site immédiatement à chaque relance.
-BURNED_COOLDOWN_S = 6 * 3600
-
 STOCK_URL = (
     "https://www.leroymerlin.fr/store-header-module/services/contextlayer/"
     "store-search-result?latitude={lat}&longitude={lon}"
@@ -55,31 +51,20 @@ class LmHttpSession:
         self.impersonate = getattr(args, "impersonate", "firefox135")
         self.verbose = getattr(args, "verbose", False)
         self.s = creq.Session(impersonate=self.impersonate, timeout=30)
-        self.burned: bool = False
         # Warmup : on ne tape l'endpoint stock qu'après avoir visité homepage +
         # fiche produit (l'endpoint attend une session déjà établie).
         self.warmed: bool = False
-        # État disque : cookies + fenêtre de pause, partagés entre lancements
-        # successifs du script (un process par cycle de scan). Sans ça, chaque
-        # lancement referait un warmup à froid.
+        # État disque : cookies, partagés entre lancements successifs du script
+        # (un process par cycle de scan). Sans ça, chaque lancement referait un
+        # warmup à froid.
         self.state_path = Path(args.data_dir) / "lm_http_state.json"
-        self.burned_until: float | None = None
         self._load_state()
 
-    # --- état disque (cookies + pause, entre lancements) ----------------- #
+    # --- état disque (cookies, entre lancements) ------------------------- #
     def _load_state(self) -> None:
         try:
             state = json.loads(self.state_path.read_text())
         except (OSError, json.JSONDecodeError):
-            return
-        burned_until = state.get("burned_until")
-        if burned_until and time.time() < burned_until:
-            self.burned = True
-            self.burned_until = burned_until
-            if self.verbose:
-                remaining = int(burned_until - time.time())
-                print(f"  session: en pause ({remaining}s restantes), "
-                      f"on ne sollicite pas le site.")
             return
         for name, value in (state.get("cookies") or {}).items():
             try:
@@ -94,21 +79,13 @@ class LmHttpSession:
                 print("  session: cookies réutilisés depuis le disque, warmup sauté.")
 
     def _save_state(self) -> None:
-        """Écrit cookies + warmed + burned_until (si fixé) sur disque.
-
-        Toujours réémettre `self.burned_until` ici (pas juste au moment où on
-        le fixe) : sinon un appel ultérieur sans cet argument écraserait la
-        fenêtre de pause déjà posée et un prochain lancement re-solliciterait
-        le site pendant la fenêtre qu'on voulait éviter.
-        """
+        """Écrit cookies + warmed sur disque."""
         cookies = {}
         try:
             cookies = {c.name: c.value for c in self.s.cookies.jar}
         except Exception:
             pass
         state = {"cookies": cookies, "warmed": self.warmed}
-        if self.burned_until is not None:
-            state["burned_until"] = self.burned_until
         try:
             self.state_path.write_text(json.dumps(state))
         except OSError:
@@ -128,7 +105,7 @@ class LmHttpSession:
         Camoufox n'est lancé qu'UNE fois au démarrage ; les cycles de scan
         suivants (mode --loop) réutilisent la session via curl_cffi seul.
         """
-        if self.warmed or self.burned:
+        if self.warmed:
             return
         if self.verbose:
             print("  warmup : Camoufox…")

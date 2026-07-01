@@ -8,7 +8,6 @@ Usage
 
   python -m stockmonitor lm --loop 1800
   python -m stockmonitor casto --notify-cmd ./notify.sh -v
-  python monitor.py lm                # wrapper racine équivalent
 
 Arguments communs :
   --data-dir <path>   dossier sorties + cache (defaut: ./data)
@@ -34,30 +33,25 @@ from .retailers import REGISTRY
 # d'une classe (premier nom rencontré dans le REGISTRY). Les alias pointent
 # vers la même classe mais ne spamment pas --help.
 # --------------------------------------------------------------------------- #
-def _canonical_names() -> list[str]:
-    seen_classes: set[type] = set()
-    out: list[str] = []
+def _canonical_map() -> dict[type, str]:
+    """Map classe -> premier nom rencontré (canonique). Construit une fois."""
+    out: dict[type, str] = {}
     for name, cls in REGISTRY.items():
-        if cls in seen_classes:
-            continue
-        seen_classes.add(cls)
-        out.append(name)
+        if cls not in out:
+            out[cls] = name
     return out
+
+
+def _canonical_names() -> list[str]:
+    return list(_canonical_map().values())
 
 
 def _resolve(name: str) -> str | None:
     """Renvoie le nom canonique pour un alias, ou None si inconnu."""
-    seen_classes: set[type] = set()
-    target_cls = REGISTRY.get(name)
-    if not target_cls:
+    cls = REGISTRY.get(name)
+    if cls is None:
         return None
-    for n, cls in REGISTRY.items():
-        if cls in seen_classes:
-            continue
-        if cls is target_cls:
-            return n
-        seen_classes.add(cls)
-    return None
+    return _canonical_map().get(cls)
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:

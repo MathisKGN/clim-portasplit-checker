@@ -30,6 +30,7 @@ from urllib.parse import quote_plus, urlencode
 
 from ..base import ScannerBase
 from ..common import (
+    aggregate,
     ean_from_url,
     http_get,
     sleep_between,
@@ -321,17 +322,8 @@ class CastoScanner(ScannerBase):
                 continue
 
             used += 1
-            new = 0
-            for rs in raw:
-                st = _parse_store(rs)
-                if not st:
-                    continue
-                sid = st["id"]
-                if sid not in all_stores:
-                    all_stores[sid] = st
-                    new += 1
-                elif st["restock"] and not all_stores[sid]["restock"]:
-                    all_stores[sid] = st
+            found = {st["id"]: st for rs in raw if (st := _parse_store(rs))}
+            new = aggregate(found, all_stores)
             if verbose:
                 print(f"    {i}/{len(seeds)} {label} : {len(raw)} reçus (+{new})")
             stable = stable + 1 if new == 0 else 0
@@ -340,7 +332,6 @@ class CastoScanner(ScannerBase):
             if i < len(seeds):
                 sleep_between(args)
 
-        return {"ean": ean, "online": online,
-                "stores": all_stores, "blocked": errors, "seeds": used,
+        return {"stores": all_stores, "blocked": errors, "seeds": used,
                 "completed": errors == 0,
                 "extra": {"online": online}}

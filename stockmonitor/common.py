@@ -107,7 +107,7 @@ def ean_from_url(url: str, pattern: str = r"/(\d{8,14})_[A-Z]{2,4}\.prd") -> str
     """Extrait un code produit (EAN/réf) d'une URL de fiche produit.
 
     Par défaut : pattern Castorama (`.prd`). Passer un pattern custom pour
-    d'autres enseignes. Lève SystemExit si non trouvé.
+    d'autres enseignes. Lève ValueError si non trouvé.
     """
     m = re.search(pattern, url)
     if not m:

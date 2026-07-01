@@ -166,14 +166,6 @@ class ScannerBase(ABC):
 
         return in_stock
 
-    def _cli_name(self) -> str:
-        """Nom canonique de cette enseigne pour les suggestions de commande."""
-        from .retailers import REGISTRY
-        for n, cls in REGISTRY.items():
-            if isinstance(self, cls):
-                return n
-        return self.RETAILER_NAME.lower()
-
     def _store_qty_label(self, store: dict) -> str:
         """Libellé court entre crochets pour l'affichage restock."""
         if store.get("quantity") is not None:
@@ -193,7 +185,6 @@ class ScannerBase(ABC):
             "retailer": self.RETAILER_NAME,
             "product_ref": getattr(args, "product_ref", None),
             **result,
-            "stores": result["stores"],
         })
 
         ordered = self.sort_stores(stores)
@@ -331,24 +322,57 @@ class ScannerBase(ABC):
 
     def _run_loop(self, args):
         """Boucle : réutilise le transport (navigateur/session) entre les cycles
-        si possible. Recrée en cas d'erreur fatale."""
+        si possible. Recrée en cas d'erreur fatale (contexte mort).
+
+        `open_context` peut échouer au démarrage ou en cours de boucle ; on
+        retente à chaque cycle plutôt que de retryer indéfiniment contre un
+        contexte mort. Ctrl-C interrompt proprement à tout moment.
+        """
         import random as _r
+        ctx = None
         try:
-            with self.open_context(args) as ctx:
-                self.prepare_context(ctx, args)
-                while True:
-                    self._loop_one_cycle(args, ctx)
+            while True:
+                try:
+                    if ctx is None:
+                        ctx_cm = self.open_context(args)
+                        ctx = ctx_cm.__enter__()
+                        try:
+                            self.prepare_context(ctx, args)
+                        except Exception:
+                            ctx_cm.__exit__(None, None, None)
+                            ctx = None
+                            raise
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"[{ts()}] Échec open_context : {e!r}, retry au prochain cycle…")
+                    ctx = None
                     time.sleep(args.loop + _r.uniform(0, args.loop * 0.15))
+                    continue
+                try:
+                    self.run_cycle(ctx, args)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"[{ts()}] Erreur de cycle : {e!r}, contexte recréé au prochain cycle.")
+                    # Le contexte est possiblement mort : on le ferme et on
+                    # force la réouverture au prochain tour.
+                    try:
+                        ctx_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    ctx = None
+                time.sleep(args.loop + _r.uniform(0, args.loop * 0.15))
         except KeyboardInterrupt:
             print("\nArrêt demandé.")
-            return
-        # Fallback : si l'adapteur ne supporte pas un transport réutilisable
-        # (open_context lève), on rouvre à chaque cycle.
-        while True:
-            self._loop_one_cycle(args, None)
-            time.sleep(args.loop + _r.uniform(0, args.loop * 0.15))
+            if ctx is not None:
+                try:
+                    ctx_cm.__exit__(None, None, None)
+                except Exception:
+                    pass
 
     def _loop_one_cycle(self, args, ctx):
+        # Conservé pour compat éventuelle ; _run_loop gère désormais le cycle.
         try:
             if ctx is None:
                 self.run_once(args)
