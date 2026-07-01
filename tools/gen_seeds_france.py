@@ -16,8 +16,8 @@ Le paramètre de MARGE `N` = combien de magasins on suppose « vus » par seed :
 Candidats = positions des magasins eux-mêmes (place un seed sur chaque magasin,
 puis élague). Chaque seed retenu est nommé d'après le magasin sur lequel il est.
 
-Entrée : une liste JSON de magasins {name, city, cp, lat, lon} (cf.
-data/stores_200km.json, produit par tools/map_stores.py).
+Entrée : la liste officielle des magasins {name, city, cp, lat, lon}
+(data/lm_stores.json, produite par tools/fetch_lm_stores.py).
 
 Usage :
   python3 tools/gen_seeds_france.py            # paris200, marge N=11 -> seeds_france.py
@@ -42,14 +42,21 @@ def haversine_km(a, b, c, d) -> float:
     return 2 * r * math.asin(math.sqrt(x))
 
 
-def load_stores(path: Path, center) -> list[dict]:
-    """Magasins uniques (dédup par coord arrondie), triés cœur-d'abord."""
+def load_stores(path: Path, center, max_dist_km: float | None = None) -> list[dict]:
+    """Magasins uniques (dédup par coord arrondie), triés cœur-d'abord.
+
+    Si max_dist_km est fourni, ne garde que les magasins à <= cette distance du
+    centre (sert à dériver la zone paris200 depuis la liste France entière).
+    """
     raw = json.loads(path.read_text(encoding="utf-8"))
     uniq: dict = {}
     for s in raw:
         key = (round(s["lat"], 3), round(s["lon"], 3))
         uniq.setdefault(key, s)
     pts = list(uniq.values())
+    if max_dist_km is not None:
+        pts = [s for s in pts
+               if haversine_km(center[0], center[1], s["lat"], s["lon"]) <= max_dist_km]
     # core-first : traite le centre en premier pour un ordre de sortie lisible
     # (n'influe pas sur la couverture, seulement sur l'ordre des seeds).
     pts.sort(key=lambda s: haversine_km(center[0], center[1], s["lat"], s["lon"]))
@@ -91,8 +98,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--margin", type=int, default=11,
                     help="N magasins supposés vus par seed (11=réel, 8=marge)")
-    ap.add_argument("--input", default="data/stores_200km.json",
-                    help="liste JSON de magasins {city,cp,lat,lon}")
+    ap.add_argument("--input", default="data/lm_stores.json",
+                    help="liste JSON de magasins {city,lat,lon} (cf. fetch_lm_stores.py)")
+    ap.add_argument("--max-dist-km", type=float, default=None,
+                    help="ne garder que les magasins à <= X km du centre")
     ap.add_argument("--out", default="stockmonitor/seeds_france.py",
                     help="fichier seeds à générer")
     ap.add_argument("--var", default="SEEDS_FRANCE_200KM",
@@ -106,7 +115,7 @@ def main() -> None:
     args = ap.parse_args()
 
     center = tuple(float(x) for x in args.center.split(","))
-    pts = load_stores(HERE / args.input, center)
+    pts = load_stores(HERE / args.input, center, args.max_dist_km)
 
     chosen = set_cover(pts, args.margin)
     seeds = [(seed_name(pts[i]), round(pts[i]["lat"], 4), round(pts[i]["lon"], 4))
@@ -122,7 +131,8 @@ def main() -> None:
     input_name = Path(args.input).name
     regen = (f"python3 tools/gen_seeds_france.py --margin {args.margin} "
              f"--input {args.input} --out {args.out} --var {args.var} "
-             f'--label "{args.label}" --center {args.center} --zone {args.zone}')
+             f'--label "{args.label}" --center {args.center} --zone {args.zone}'
+             + (f" --max-dist-km {args.max_dist_km:g}" if args.max_dist_km else ""))
     body = f'''"""
 Seeds pour le scan {args.label}.
 

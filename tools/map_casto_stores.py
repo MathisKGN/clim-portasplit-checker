@@ -3,7 +3,7 @@
 Cartographie des magasins Castorama France + calcul des seeds optimaux pour
 couvrir TOUS les magasins en un minimum d'appels à l'API Kingfisher.
 
-Pipeline (calqué sur map_stores.py pour Leroy Merlin, adapté Castorama) :
+Pipeline (géocodage Nominatim + set-cover greedy, adapté Castorama) :
   1. Parse la liste des magasins Casto FR (noms + villes + CP), fournie
      manuellement (liste extraite du locator castorama.fr).
   2. Géocode chaque ville via Nominatim (OpenStreetMap), 1 req/s (usage policy),
