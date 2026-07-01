@@ -244,9 +244,12 @@ class LmHttpSession:
         Avant chaque requête stock, on re-GET la fiche produit. En cas
         d'échec, on re-GET et on retente sur plusieurs tours.
 
-        Sur cookie mort (403 / page DataDome), on ne martèle pas l'endpoint :
-        on retourne immédiatement pour que l'appelant déclenche un remint()
-        une seule fois (cf. _scan_http), comme le chemin Casto le fait sur 401.
+        Sur 403 / page DataDome : DataDome rotate le cookie à CHAQUE réponse
+        (Set-Cookie présent sur 200 ET 403, confirmé par capture mitmproxy).
+        Le 403 est donc stochastique, pas un cookie « mort » : un retry avec
+        backoff passe le plus souvent à 200 sans avoir besoin d'un remint
+        Camoufox coûteux (~15 s). On ne retourne à l'appelant qu'après
+        épuisement des retries → l'appelant peut alors déclencher remint().
         """
         r = None
         for attempt in range(max_rounds):
@@ -258,8 +261,15 @@ class LmHttpSession:
             if r.status_code == 200 and "m-store-search-result" in r.text:
                 self._save_state()  # session confirmée -> réutilisable au run suivant
                 return 200, r.text
-            # Cookie mort : ne pas retry avec le même cookie (aggrave le score).
+            # 403 stochastique : retry avec backoff croissant (le cookie rotated
+            # par Set-Cookie donne une nouvelle chance à chaque tentative).
             if self._is_cookie_dead(r.status_code, r.text):
+                if attempt < max_rounds - 1:
+                    if self.verbose:
+                        print(f"    [{lat:.4f},{lon:.4f}] 403 (attempt {attempt+1}/"
+                              f"{max_rounds}), retry avec backoff…")
+                    time.sleep(random.uniform(2.0, 4.0) * (attempt + 1))
+                    continue
                 return r.status_code, r.text
             if self.verbose and attempt < max_rounds - 1:
                 print(f"    [{lat:.4f},{lon:.4f}] attempt {attempt+1}/{max_rounds} "
