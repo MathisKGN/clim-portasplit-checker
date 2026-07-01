@@ -150,6 +150,7 @@ class Dashboard:
 
         s = self.state
         phase = s.get("phase", "idle")
+        now = dt.datetime.now()
 
         # --- En-tête ------------------------------------------------------- #
         title = Text()
@@ -157,6 +158,12 @@ class Dashboard:
         if s.get("zone"):
             title.append(f"  ·  {s['zone']}", style="magenta")
         title.append(f"  ·  cycle #{s.get('cycle', 1)}", style="dim")
+        # Chrono total du scan (à droite).
+        scan_start = s.get("scan_started_at")
+        if scan_start:
+            elapsed = now - scan_start
+            mm, ss = divmod(int(elapsed.total_seconds()), 60)
+            title.append(f"  ·  ⏱ {mm:02d}:{ss:02d}", style="dim cyan")
 
         # --- Statut actuel (spinner + ligne) ------------------------------- #
         if phase == "scanning":
@@ -165,13 +172,22 @@ class Dashboard:
         elif phase == "warmup":
             spinner = Spinner("dots", text=self._status_text(s), style="yellow")
             status_line = spinner
+        elif phase == "pausing":
+            pause_until = s.get("pause_until")
+            if pause_until and pause_until > now:
+                secs = max(0, int((pause_until - now).total_seconds()))
+                spinner = Spinner("dots", text=Text(
+                    f"  pause {secs}s avant le prochain point",
+                    style="dim cyan"), style="cyan")
+                status_line = spinner
+            else:
+                status_line = Text("  …", style="dim")
         elif phase == "done":
             status_line = Text("✓ Scan terminé", style="bold green")
         elif phase == "countdown":
             remaining = s.get("next_at")
             if remaining:
-                delta = remaining - dt.datetime.now()
-                secs = max(0, int(delta.total_seconds()))
+                secs = max(0, int((remaining - now).total_seconds()))
                 mm, ss = divmod(secs, 60)
                 spinner = Spinner("moon", text=Text(
                     f"  Prochaine vérif dans {mm:02d}:{ss:02d}", style="cyan"))
@@ -246,9 +262,15 @@ class Dashboard:
 
     def _status_text(self, s) -> "Text":
         from rich.text import Text
+        now = dt.datetime.now()
         phase = s.get("phase", "idle")
         if phase == "warmup":
-            return Text(f"  Préparation : {s.get('action', '…')}", style="yellow")
+            t = Text(f"  Préparation : {s.get('action', '…')}", style="yellow")
+            ws = s.get("warmup_started_at")
+            if ws:
+                secs = int((now - ws).total_seconds())
+                t.append(f"  ({secs}s)", style="dim")
+            return t
         idx = s.get("index", 0)
         total = s.get("total", 0)
         label = s.get("label", "")
@@ -258,6 +280,11 @@ class Dashboard:
         if total:
             t.append(f"{idx}/{total}", style="bold cyan")
             t.append(f"  {label}", style="dim")
+        # Chrono du seed en cours.
+        ss = s.get("seed_started_at")
+        if ss:
+            secs = int((now - ss).total_seconds())
+            t.append(f"  ({secs}s)", style="dim cyan")
         return t
 
     def _progress(self, s):
@@ -286,21 +313,31 @@ def make_handler(state: dict, scanner: ScannerBase):
             state["label"] = ""
             state["blocked"] = 0
             state["completed"] = False
+            state["scan_started_at"] = dt.datetime.now()
+            state["seed_started_at"] = None
+            state["pause_until"] = None
+            state["warmup_started_at"] = None
         elif event_type == "warmup":
             state["phase"] = "warmup"
             state["action"] = (payload.get("detail") or payload.get("phase", "")
                                ).replace("_", " ")
+            state["warmup_started_at"] = dt.datetime.now()
+            state["seed_started_at"] = None
+            state["pause_until"] = None
         elif event_type == "seed_start":
             state["phase"] = "scanning"
             state["index"] = payload.get("index", state.get("index", 0))
             state["total"] = payload.get("total", state.get("total", 0))
             state["label"] = payload.get("label", "")
             state["action"] = "Point"
+            state["seed_started_at"] = dt.datetime.now()
+            state["pause_until"] = None
         elif event_type == "seed_done":
             state["phase"] = "scanning"
             state["index"] = payload.get("index", state.get("index", 0))
             state["total"] = payload.get("total", state.get("total", 0))
             state["label"] = payload.get("label", "")
+            state["seed_started_at"] = None  # seed fini, chrono figé
             added = payload.get("stores_added") or []
             ts_idx = state.get("_counter", 0)
             for st in added:
@@ -314,9 +351,19 @@ def make_handler(state: dict, scanner: ScannerBase):
         elif event_type == "seed_blocked":
             state["blocked"] = state.get("blocked", 0) + 1
             state["label"] = payload.get("label", "")
+            state["seed_started_at"] = None
+        elif event_type == "pause":
+            # Sleep bloquant : on pose une cible temps pour le countdown.
+            state["phase"] = "pausing"
+            state["pause_until"] = (dt.datetime.now()
+                                   + dt.timedelta(seconds=payload.get("seconds", 0)))
+            state["seed_started_at"] = None
         elif event_type == "remint":
             state["phase"] = "warmup"
             state["action"] = "re-mint session"
+            state["warmup_started_at"] = dt.datetime.now()
+            state["pause_until"] = None
+            state["seed_started_at"] = None
         elif event_type == "online":
             state["online"] = {
                 "available": payload.get("available", False),
@@ -327,6 +374,8 @@ def make_handler(state: dict, scanner: ScannerBase):
             state["in_stock"] = payload.get("in_stock", 0)
             state["blocked"] = payload.get("blocked", 0)
             state["completed"] = payload.get("completed", True)
+            state["seed_started_at"] = None
+            state["pause_until"] = None
     return handler
 
 
@@ -340,44 +389,6 @@ def _build_namespace(overrides: dict, cfg: dict) -> argparse.Namespace:
               "product_url", "verbose"):
         setattr(ns, k, overrides.get(k))
     return ns
-
-
-def _print_final_report(state: dict, scanner: ScannerBase, result: dict) -> None:
-    """Rapport final en Rich après le dashboard (restocks mis en avant)."""
-    from rich.console import Console
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.text import Text
-
-    console = Console()
-    stores = list(result["stores"].values())
-    in_stock = [s for s in stores if s.get("restock")]
-    ordered = scanner.sort_stores(in_stock)
-
-    if not in_stock:
-        console.print(Panel(
-            Text("Aucun magasin en stock pour le moment.", style="yellow"),
-            border_style="yellow", title="[yellow]Résultat[/]"))
-        return
-
-    t = Table(title="▲ RESTOCK", title_style="bold green", expand=True,
-              show_lines=False)
-    t.add_column("Magasin", overflow="fold")
-    t.add_column("Dispo", width=10)
-    t.add_column("Distance", width=9)
-    t.add_column("Lien", overflow="fold")
-    for s in ordered:
-        qty = s.get("quantity")
-        label = (f"{qty} pc" if qty is not None
-                 else s.get("stock_level") or s.get("status_text") or "?")
-        dist = s.get("distance_km")
-        t.add_row(
-            Text(s.get("name", s.get("id", "?")), style="bold green"),
-            label,
-            f"{dist} km" if dist is not None else "—",
-            Text(scanner.store_url(s), style="blue underline"),
-        )
-    console.print(t)
 
 
 class _NullStdout:
@@ -413,6 +424,10 @@ def _run_with_live(scanner: ScannerBase, ns: argparse.Namespace,
     state["index"] = 0
     state["total"] = 0
     state["_counter"] = 0
+    state["scan_started_at"] = None
+    state["seed_started_at"] = None
+    state["pause_until"] = None
+    state["warmup_started_at"] = None
 
     dash = Dashboard(state)
     console = Console()  # ancré sur le vrai stdout AVANT redirection
@@ -526,6 +541,8 @@ def main() -> int:
         "index": 0, "total": 0, "label": "", "action": "",
         "stores": {}, "in_stock": 0, "blocked": 0, "completed": True,
         "online": None, "cycle": 1, "next_at": None,
+        "scan_started_at": None, "seed_started_at": None,
+        "pause_until": None, "warmup_started_at": None,
     }
 
     cycle = 0
@@ -540,8 +557,7 @@ def main() -> int:
                 ns = _build_namespace(overrides, cfg)
                 sc.apply_config(ns, cfg)
                 Path(ns.data_dir).mkdir(parents=True, exist_ok=True)
-                result = _run_with_live(sc, ns, state)
-                _print_final_report(state, sc, result)
+                _run_with_live(sc, ns, state)
             if not loop_sec:
                 break
             # Petite pause avant le compte à rebours pour laisser lire le final.
