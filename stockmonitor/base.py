@@ -1,0 +1,365 @@
+"""ScannerBase — squelette partagé par tous les adapteurs de stock.
+
+Un scan produit une `result` dict standardisée :
+    {
+      "stores":   {<id>: {id, name, state, restock, url, …}},   # plats
+      "completed": bool,           # scan arrivé au bout ?
+      "blocked":   int,            # nb erreurs/blocages (0 si non pertinent)
+      "extra":     {...},          # champ libre (online Casto, zone LM, …)
+    }
+
+Convention `state` des magasins (chaîne) :
+    "IN"           dispo (restock candidat)
+    "OUT"          indisponible
+    "NOT_CARRIED"  magasin ne reference pas le produit
+    "UNKNOWN"      statut non lisible (n'alerte pas)
+
+`restock` (bool) : True si candidat restock (= alerte). En pratique équivalent
+à state=="IN", mais laisse l'adapteste décider (ex. C&C Drive 2h seul).
+"""
+from __future__ import annotations
+
+import os
+import subprocess
+import time
+from abc import ABC, abstractmethod
+from pathlib import Path
+
+from .common import (
+    load_state,
+    save_json,
+    sleep_between,
+    ts,
+    write_csv,
+    append_history,
+)
+
+
+class ScannerBase(ABC):
+    """Classe abstraite — un adapteur par enseigne.
+
+    Sous-classes à implémenter dans stockmonitor/retailers/*.py.
+    Le cycle complet (run -> report -> persist -> alerts) est géré ici.
+    """
+
+    # --- Identité de l'enseigne (à surcharger) ----------------------------- #
+    RETAILER_NAME: str = "base"            # ex. "Leroy Merlin"
+    FILE_PREFIX: str = ""                 # préfixe fichiers (ex. "casto"). "" = retailer.lower()
+    ENV_PREFIX: str = ""                  # préfixe env notify (ex. "LM", "CASTO")
+    DEFAULT_PRODUCT_REF: str = ""         # identifiant produit par défaut
+    DEFAULT_PRODUCT_URL: str = ""         # URL fiche produit (scrap / init)
+    HAS_ONLINE_AVAILABILITY: bool = False  # l'enseigne expose-t-elle la dispo en ligne ?
+
+    # ------------------------------------------------------------------ #
+    # Hooks à implémenter
+    # ------------------------------------------------------------------ #
+    @abstractmethod
+    def scan(self, ctx, args) -> dict:
+        """Exécute le scan dans le contexte `ctx` (page navigateur ou session).
+
+        Renvoie la `result` dict standardisée (voir docstring module).
+        """
+
+    @abstractmethod
+    def open_context(self, args):
+        """Ouvre le transport (Camoufox context, requests.Session, …).
+
+        Doit être un context manager (supporte `with ... as ctx:`).
+        """
+
+    @abstractmethod
+    def add_arguments(self, parser) -> None:
+        """Ajoute les arguments CLI spécifiques à l'enseigne (--product-url, …)."""
+
+    @abstractmethod
+    def store_url(self, store: dict) -> str:
+        """URL publique pour voir le stock de ce magasin (notify / report)."""
+
+    # Pages d'output : un classement par magasin dans l'ordre voulu.
+    def sort_stores(self, stores: list[dict]) -> list[dict]:
+        """Ordre d'affichage des magasins dans le report/CSV. Defaut: par nom."""
+        return sorted(stores, key=lambda x: x.get("name", ""))
+
+    def csv_header(self) -> list[str]:
+        return ["id", "magasin", "etat", "statut_texte", "distance_km", "url"]
+
+    def csv_row(self, store: dict) -> list:
+        return [
+            store.get("id") or store.get("slug", ""),
+            store.get("name", ""),
+            store.get("state", ""),
+            store.get("status_text", ""),
+            store.get("distance_km", ""),
+            self.store_url(store),
+        ]
+
+    def extra_history_fields(self, result: dict) -> dict:
+        """Champs supplémentaires à inscrire dans history.jsonl (override)."""
+        return {}
+
+    # ------------------------------------------------------------------ #
+    # Identité / chemins
+    # ------------------------------------------------------------------ #
+    @property
+    def prefix(self) -> str:
+        return self.FILE_PREFIX or self.RETAILER_NAME.lower().replace(" ", "_")
+
+    def env_name(self, suffix: str) -> str:
+        return f"{self.ENV_PREFIX}_{suffix}" if self.ENV_PREFIX else suffix
+
+    def paths(self, args):
+        d = Path(args.data_dir)
+        return {
+            "last_run_json": d / f"{self.prefix}_last_run.json",
+            "last_run_csv":  d / f"{self.prefix}_last_run.csv",
+            "history":       d / f"{self.prefix}_history.jsonl",
+            "state":         d / f"{self.prefix}_state.json",
+            "restock":       d / f"{self.prefix}_RESTOCK.json",
+        }
+
+    # ------------------------------------------------------------------ #
+    # Report
+    # ------------------------------------------------------------------ #
+    def report(self, result: dict, args, fresh_ids: set[str] | None = None) -> list[dict]:
+        stores = result["stores"]
+        in_stock = [s for s in stores.values() if s.get("restock")]
+        not_carried = [s for s in stores.values() if s.get("state") == "NOT_CARRIED"]
+        unknown = [s for s in stores.values() if s.get("state") == "UNKNOWN"]
+        completed = result.get("completed", True)
+        blocked = result.get("blocked", 0)
+        verbose = getattr(args, "verbose", False)
+        fresh_ids = fresh_ids or set()
+
+        # Ligne résumé : « 93 magasins · 1 en stock · 3 non réf. · ⚠ 2 blocages »
+        parts = [f"{len(stores)} magasins", f"{len(in_stock)} en stock"]
+        if not_carried:
+            parts.append(f"{len(not_carried)} non réf.")
+        if unknown:
+            parts.append(f"{len(unknown)} ?")
+        if blocked:
+            parts.append(f"⚠ {blocked} blocage{'s' if blocked > 1 else ''}")
+        if not completed and blocked == 0:
+            parts.append("scan incomplet")
+        print(f"  {' · '.join(parts)}")
+
+        # Dispo en ligne (optionnelle, ex. Casto)
+        online = result.get("extra", {}).get("online")
+        if online:
+            avail = online.get("home_delivery") or online.get("error") or "n/a"
+            tag = "commandable" if online.get("available") else "rupture"
+            print(f"  🌐 en ligne : {avail} ({tag})")
+
+        # Restocks : liste compacte (★ = nouveau depuis le dernier run).
+        if in_stock:
+            print()
+            print("  ▲ RESTOCK")
+            for s in self.sort_stores(in_stock):
+                sid = self._store_id(s)
+                mark = " ★" if sid in fresh_ids else ""
+                print(f"    {s['name']} — {self._store_qty_label(s)}{mark}")
+                print(f"      {self.store_url(s)}")
+        elif verbose and unknown:
+            print("\n  ❔ Statuts non reconnus :")
+            for s in unknown:
+                print(f"    {s['name']} — state={s.get('state')} "
+                      f"text={s.get('status_text','')!r}")
+
+        return in_stock
+
+    def _cli_name(self) -> str:
+        """Nom canonique de cette enseigne pour les suggestions de commande."""
+        from .retailers import REGISTRY
+        for n, cls in REGISTRY.items():
+            if isinstance(self, cls):
+                return n
+        return self.RETAILER_NAME.lower()
+
+    def _store_qty_label(self, store: dict) -> str:
+        """Libellé court entre crochets pour l'affichage restock."""
+        if store.get("quantity") is not None:
+            return f"{store['quantity']} pc"
+        return store.get("stock_level") or store.get("status_text") or "?"
+
+    # ------------------------------------------------------------------ #
+    # Persistance
+    # ------------------------------------------------------------------ #
+    def persist_outputs(self, result: dict, args):
+        stamp = ts()
+        p = self.paths(args)
+        stores = list(result["stores"].values())
+
+        save_json(p["last_run_json"], {
+            "timestamp": stamp,
+            "retailer": self.RETAILER_NAME,
+            "product_ref": getattr(args, "product_ref", None),
+            **result,
+            "stores": result["stores"],
+        })
+
+        ordered = self.sort_stores(stores)
+        write_csv(p["last_run_csv"], self.csv_header(),
+                  [self.csv_row(s) for s in ordered])
+
+        history_record = {
+            "ts": stamp,
+            "in_stock": [self._store_id(s) for s in stores if s.get("restock")],
+            "total": len(stores),
+            "blocked": result.get("blocked", 0),
+            "completed": result.get("completed", True),
+            **self.extra_history_fields(result),
+        }
+        append_history(p["history"], history_record)
+
+    @staticmethod
+    def _store_id(store: dict) -> str:
+        return store.get("id") or store.get("slug", "")
+
+    # ------------------------------------------------------------------ #
+    # Alertes
+    # ------------------------------------------------------------------ #
+    def handle_alerts(self, in_stock: list[dict], result: dict, args):
+        """N'alerte que pour les nouveaux restocks (anti-spam via state.json).
+
+        Si le scan est incomplet, on NE purge PAS les anciens restocks signalés
+        (on les garde en union) pour ne pas respammer au prochain scan complet.
+        """
+        completed = result.get("completed", True)
+        p = self.paths(args)
+        prev = load_state(p["state"])
+        prev_in = set(prev.get("in_stock", []))
+
+        prev_online = bool(prev.get("online_available"))
+        now_in = {self._store_id(s) for s in in_stock}
+        online = result.get("extra", {}).get("online", {})
+        online_now = bool(online.get("available")) if online else False
+
+        fresh_stores = [s for s in in_stock if self._store_id(s) not in prev_in]
+        fresh_online = online_now and not prev_online
+
+        persisted_in = now_in if completed else (prev_in | now_in)
+        state_record = {
+            "in_stock": sorted(persisted_in),
+            "updated": ts(),
+            "last_scan_completed": completed,
+        }
+        if online:
+            state_record["online_available"] = online_now
+
+        save_json(p["state"], state_record)
+
+        if fresh_stores or fresh_online:
+            self.notify(fresh_stores, fresh_online, result, args)
+        return fresh_stores, fresh_online
+
+    def notify(self, fresh_stores: list[dict], fresh_online: bool,
+               result: dict, args):
+        """Hook d'alerte : RESTOCK.json + --notify-cmd.
+
+        L'affichage console est géré par report() (liste compacte ▲ RESTOCK).
+        Ici on persiste + on déclenche le hook externe (Telegram, …).
+        Variables env : <ENV_PREFIX>_MESSAGE / _STORES / _PRODUCT_REF / …
+        """
+        lines = []
+        if fresh_online:
+            online = result.get("extra", {}).get("online", {})
+            lines.append(f"EN LIGNE de nouveau commandable "
+                         f"({online.get('home_delivery')})")
+        for s in fresh_stores:
+            lines.append(f"{s['name']} — {self._store_qty_label(s)}\n  {self.store_url(s)}")
+
+        ref = getattr(args, "product_ref", "") or getattr(args, "product_url", "")
+        msg = (f"RESTOCK {self.RETAILER_NAME} ({ref}) :\n" + "\n".join(lines))
+
+        save_json(self.paths(args)["restock"], {
+            "ts": ts(),
+            "retailer": self.RETAILER_NAME,
+            "product_ref": getattr(args, "product_ref", None),
+            "online": result.get("extra", {}).get("online"),
+            "fresh_online": fresh_online,
+            "stores": fresh_stores,
+        })
+
+        if getattr(args, "notify_cmd", None):
+            env = {**os.environ,
+                   self.env_name("MESSAGE"): msg,
+                   self.env_name("STORES"): _json(fresh_stores)}
+            ref_val = getattr(args, "product_ref", None)
+            if ref_val:
+                env[self.env_name("PRODUCT_REF")] = ref_val
+            try:
+                subprocess.run(args.notify_cmd, shell=True, check=False, env=env)
+            except Exception as e:
+                print(f"  notify-cmd a échoué : {e}")
+
+    # ------------------------------------------------------------------ #
+    # Cycle / main
+    # ------------------------------------------------------------------ #
+    def run_cycle(self, ctx, args) -> dict:
+        """Un cycle : scan -> alertes (state + external hook) -> affichage."""
+        result = self.scan(ctx, args)
+        print(f"[{ts()}] {self.RETAILER_NAME}")
+        fresh_stores, fresh_online = self.handle_alerts(
+            [s for s in result["stores"].values() if s.get("restock")],
+            result, args)
+        fresh_ids = {self._store_id(s) for s in fresh_stores}
+        self.report(result, args, fresh_ids)
+        if fresh_stores or fresh_online:
+            tail = " + en ligne" if fresh_online else ""
+            print(f"  → {len(fresh_stores)} nouvelle alerte{tail}")
+        self.persist_outputs(result, args)
+        return result
+
+    def run_once(self, args) -> dict:
+        with self.open_context(args) as ctx:
+            self.prepare_context(ctx, args)
+            return self.run_cycle(ctx, args)
+
+    def prepare_context(self, ctx, args) -> None:
+        """Hook optionnel : setup page navigateur, route, etc. No-op par défaut."""
+        pass
+
+    def run_main(self, args):
+        """Boucle principale : un seul run ou auto-boucle (--loop)."""
+        Path(args.data_dir).mkdir(parents=True, exist_ok=True)
+
+        if getattr(args, "loop", 0) and args.loop > 0:
+            print(f"[{ts()}] {self.RETAILER_NAME} · mode boucle toutes les {args.loop}s "
+                  f"(Ctrl-C pour arrêter)")
+            self._run_loop(args)
+        else:
+            self.run_once(args)
+
+    def _run_loop(self, args):
+        """Boucle : réutilise le transport (navigateur/session) entre les cycles
+        si possible. Recrée en cas d'erreur fatale."""
+        import random as _r
+        try:
+            with self.open_context(args) as ctx:
+                self.prepare_context(ctx, args)
+                while True:
+                    self._loop_one_cycle(args, ctx)
+                    time.sleep(args.loop + _r.uniform(0, args.loop * 0.15))
+        except KeyboardInterrupt:
+            print("\nArrêt demandé.")
+            return
+        # Fallback : si l'adapteur ne supporte pas un transport réutilisable
+        # (open_context lève), on rouvre à chaque cycle.
+        while True:
+            self._loop_one_cycle(args, None)
+            time.sleep(args.loop + _r.uniform(0, args.loop * 0.15))
+
+    def _loop_one_cycle(self, args, ctx):
+        try:
+            if ctx is None:
+                self.run_once(args)
+            else:
+                self.run_cycle(ctx, args)
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            print(f"[{ts()}] Erreur de cycle : {e!r}")
+
+
+def _json(obj) -> str:
+    import json
+    return json.dumps(obj, ensure_ascii=False)

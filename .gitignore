@@ -1,0 +1,28 @@
+# Données locales (cookies, état, sorties) — jamais pousser.
+data/
+
+# Scripts d'exploration temporaires (reverse-eng, pas utiles en prod)
+tools/probe_*.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Éditeurs
+.vscode/
+.idea/
+.claude/
+
+# Scripts/pages tierces capturées (reverse-eng) — hors repo public
+tags*.js
+*.html
+DATADOME_RECON.md
+tools/recon_*.py
