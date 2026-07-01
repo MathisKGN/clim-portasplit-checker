@@ -287,19 +287,20 @@ class CastoScanner(ScannerBase):
     def scan(self, session, args) -> dict:
         args = self.enrich_args(args)
         ean = args.product_ref
+        self._emit("warmup", phase="token", detail="fetch_token")
         token = _get_token(session, args)
-
+        self._emit("warmup", phase="online", detail="fulfilment_check")
         online = _fetch_online(session, ean, args.postcode)
+        self._emit("online", available=bool(online.get("available")),
+                   home_delivery=online.get("home_delivery") or online.get("error"))
 
         seeds = list(SEEDS_CASTO_FRANCE)
         if args.max_seeds and args.max_seeds > 0:
             seeds = seeds[: args.max_seeds]
+        total = len(seeds)
 
-        verbose = getattr(args, "verbose", False)
-        if verbose:
-            print(f"  EAN {ean} · en ligne: "
-                  f"{online.get('home_delivery') or online.get('error')} · "
-                  f"scan {len(seeds)} points France")
+        self._emit("scan_start", total_seeds=total, zone="France",
+                   product_ref=ean, product_url=getattr(args, "product_url", None))
 
         all_stores: dict = {}
         errors = 0
@@ -307,10 +308,12 @@ class CastoScanner(ScannerBase):
         stable = 0
         used = 0
         for i, (label, lat, lon) in enumerate(seeds, 1):
+            self._emit("seed_start", index=i, total=total, label=label)
             try:
                 raw = _fetch_stores_near(session, token, ean, lat, lon, args.page_size)
             except PermissionError:
                 if not refreshed:
+                    self._emit("remint", reason="token_401")
                     token = _get_token(session, args, force=True)
                     refreshed = True
                     raw = _fetch_stores_near(session, token, ean, lat, lon, args.page_size)
@@ -318,22 +321,27 @@ class CastoScanner(ScannerBase):
                     raise
             except Exception as e:
                 errors += 1
-                if verbose:
-                    print(f"    {i}/{len(seeds)} {label} ⚠ {e!r}")
+                self._emit("seed_blocked", index=i, total=total, label=label,
+                           status=str(e))
                 sleep_between(args, long=True)
                 continue
 
             used += 1
             found = {st["id"]: st for rs in raw if (st := _parse_store(rs))}
+            stores_added = list(found.values())
             new = aggregate(found, all_stores)
-            if verbose:
-                print(f"    {i}/{len(seeds)} {label} : {len(raw)} reçus (+{new})")
+            self._emit("seed_done", index=i, total=total, label=label,
+                       found=len(raw), new=new, total_stores=len(all_stores),
+                       stores_added=stores_added)
             stable = stable + 1 if new == 0 else 0
             if all_stores and stable >= args.stable_rounds:
                 break
             if i < len(seeds):
                 sleep_between(args)
 
+        in_stock = sum(1 for s in all_stores.values() if s.get("restock"))
+        self._emit("scan_done", total_stores=len(all_stores), in_stock=in_stock,
+                   blocked=errors, completed=errors == 0, seeds_used=used)
         return {"stores": all_stores, "blocked": errors, "seeds": used,
                 "completed": errors == 0,
                 "extra": {"online": online}}

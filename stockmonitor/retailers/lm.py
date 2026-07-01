@@ -236,9 +236,10 @@ class LmScanner(ScannerBase):
     # --- Scan HTTP pur (sans navigateur) ----------------------------------- #
     def _scan_http(self, sess, args) -> dict:
         seeds, zone = self._select_seeds(args)
-        verbose = getattr(args, "verbose", False)
-        if verbose:
-            print(f"  scan HTTP {len(seeds)} points sans navigateur ({zone})")
+        total = len(seeds)
+        self._emit("scan_start", total_seeds=total, zone=zone,
+                   product_ref=getattr(args, "product_ref", None),
+                   product_url=getattr(args, "product_url", None))
         all_stores: dict = {}
         blocked = 0
         max_blocks = max(1, getattr(args, "max_blocks", 6))
@@ -259,6 +260,7 @@ class LmScanner(ScannerBase):
             status, body = sess.fetch_stock(lat, lon)
             if sess._is_cookie_dead(status, body) and not refreshed:
                 refreshed = True
+                self._emit("remint", reason="cookie_dataDome_mort")
                 sess.remint()
                 status, body = sess.fetch_stock(lat, lon)
             return status, body
@@ -267,52 +269,59 @@ class LmScanner(ScannerBase):
         # On réutilise le body du mint comme résultat du seed 0 (pas de double
         # hit Paris Centre). Si le mint échoue -> session burned, on arrête.
         first_label, first_lat, first_lon = seeds[0]
+        self._emit("seed_start", index=1, total=total, label=f"mint/{first_label}")
+        self._emit("warmup", phase="session", detail="camoufox_warmup")
         status, body = sess.mint(first_lat, first_lon)
         if sess._is_cookie_dead(status, body) and not refreshed:
             refreshed = True
+            self._emit("remint", reason="cookie_dataDome_mort")
             sess.remint()
             status, body = sess.fetch_stock(first_lat, first_lon)
         if status == 200 and "m-store-search-result" in body:
             found = _parse_stores(body)
+            stores_added = list(found.values())
             new = aggregate(found, all_stores)
-            if verbose:
-                print(f"    mint/{first_label} : {len(found)} magasins (+{new})")
+            self._emit("seed_done", index=1, total=total, label=first_label,
+                       found=len(found), new=new, total_stores=len(all_stores),
+                       stores_added=stores_added)
         else:
             if looks_blocked(status, body):
                 blocked += 1
-                if verbose:
-                    print(f"    mint/{first_label} bloqué (status={status})")
+                self._emit("seed_blocked", index=1, total=total,
+                           label=first_label, status=status)
 
         # Boucle à partir du seed 1 (seed 0 déjà couvert par le mint).
         for i, (label, lat, lon) in enumerate(seeds[1:], 2):
+            self._emit("seed_start", index=i, total=total, label=label)
             status, body = _fetch(lat, lon)
             if looks_blocked(status, body):
                 blocked += 1
-                if verbose:
-                    print(f"    {i}/{len(seeds)} {label} bloqué (status={status})")
+                self._emit("seed_blocked", index=i, total=total,
+                           label=label, status=status)
                 if blocked >= max_blocks:
-                    if verbose:
-                        print(f"  ✗ stop à {blocked} blocages (max_blocks={max_blocks})")
                     break
             else:
                 found = _parse_stores(body)
+                stores_added = list(found.values())
                 new = aggregate(found, all_stores)
-                if verbose:
-                    print(f"    {i}/{len(seeds)} {label} : {len(found)} magasins (+{new})")
+                self._emit("seed_done", index=i, total=total, label=label,
+                           found=len(found), new=new,
+                           total_stores=len(all_stores),
+                           stores_added=stores_added)
                 # stable-rounds : arrêt dès qu'on enchaîne N seeds sans nouveau
                 # magasin (couverture déjà assurée, inutile de taper tous les
                 # points et de risquer des 403).
                 stable = stable + 1 if new == 0 else 0
                 if stable_rounds and all_stores and stable >= stable_rounds:
-                    if verbose:
-                        print(f"  ◇ stop après {stable_rounds} seeds sans nouveauté "
-                              f"(stable-rounds={stable_rounds})")
                     break
             # Cadence large (2-5 s par défaut) : un humain ne scanne pas 36
             # magasins en 3 min. sleep_between respecte --min/max-delay.
             if i < len(seeds):
                 sleep_between(args)
-        return {"stores": all_stores, "blocked": blocked, "seeds": len(seeds),
+        in_stock = sum(1 for s in all_stores.values() if s.get("restock"))
+        self._emit("scan_done", total_stores=len(all_stores), in_stock=in_stock,
+                   blocked=blocked, completed=blocked == 0, seeds_used=total)
+        return {"stores": all_stores, "blocked": blocked, "seeds": total,
                 "completed": blocked == 0,
                 "extra": {"zone": zone, "engine": "http"}}
 
