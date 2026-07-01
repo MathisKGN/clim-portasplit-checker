@@ -53,6 +53,36 @@ class ScannerBase(ABC):
     # Clé de section dans config.toml (ex. "lm", "casto"). Défaut : nom canonique.
     CONFIG_KEY: str = ""
 
+    def __init__(self):
+        # Callback temps réel (signature: handler(event_type: str, payload: dict)).
+        # Si None, `_emit` ne fait rien (mode silencieux). Le mode interactif
+        # (interactive.py) y branche un renderer Rich Live. Le mode CLI legacy
+        # y branche un print() quand verbose=True.
+        self._event_handler = None
+
+    def set_event_handler(self, handler) -> None:
+        """Branche un callback temps réel (cf. interactive.py pour un exemple)."""
+        self._event_handler = handler
+
+    def _emit(self, event_type: str, **payload) -> None:
+        """Émet un évènement de progression du scan.
+
+        Types émis par les adapteurs :
+          scan_start    total_seeds, zone, product_ref, product_url
+          warmup        phase ('camoufox'|'session'|'done'), detail
+          seed_start    index, total, label
+          seed_done     index, total, label, found, new, total_stores, stores_added
+          seed_blocked  index, total, label, status
+          remint        reason
+          online        available, home_delivery
+          scan_done     total_stores, in_stock, blocked, completed, seeds_used
+        """
+        if self._event_handler is not None:
+            try:
+                self._event_handler(event_type, payload)
+            except Exception:
+                pass
+
     @classmethod
     def get_defaults(cls) -> dict:
         """Defaults codés (fallback quand config.toml + CLI ne disent rien).
