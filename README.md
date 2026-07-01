@@ -6,37 +6,51 @@ Surveille le stock d'un climatiseur (Leroy Merlin / Castorama) dans les magasins
 
 ---
 
-## 🐣 Tu ne codes pas ? Pas de panique.
+## 🐣 Tu ne codes pas ? Tu n'as RIEN d'installé ? Pas de panique.
 
-Tu n'as **rien à comprendre au code**. Juste 3 étapes, une seule fois, puis une seule commande à retenir. Suis le guide.
+On part **de zéro** : pas de Python, pas de Homebrew, rien du tout. Tu n'as **rien à comprendre au code**. Suis juste les étapes une par une, une seule fois. Ensuite, une seule commande à retenir.
 
----
-
-## 1️⃣ Installer Python (une seule fois)
-
-- **Windows** : va sur [python.org/downloads](https://www.python.org/downloads/), télécharge Python, lance l'installateur et **coche la case « Add Python to PATH »** avant de cliquer sur Install.
-- **Mac** : Python est souvent déjà là. Sinon, télécharge-le aussi sur [python.org/downloads](https://www.python.org/downloads/).
+> Pas besoin de Homebrew, ni de Git, ni de compte GitHub, ni de quoi que ce soit d'autre. Juste ce qui suit.
 
 ---
 
-## 2️⃣ Ouvrir le terminal dans le dossier du projet
+## 1️⃣ Télécharger le projet sur ton ordi
 
-Le « terminal », c'est la fenêtre noire où on tape des commandes.
-
-- **Windows** : ouvre le dossier `lm-stock-monitor`, clique dans la barre d'adresse en haut, tape `cmd` puis Entrée.
-- **Mac** : ouvre l'app **Terminal**, tape `cd ` (avec un espace), puis glisse-dépose le dossier `lm-stock-monitor` dans la fenêtre, puis Entrée.
+1. En haut de cette page (sur GitHub), clique sur le bouton vert **« Code »**, puis **« Download ZIP »**.
+2. Ouvre le fichier `.zip` téléchargé (généralement dans ton dossier **Téléchargements**) pour le décompresser.
+3. Tu obtiens un dossier nommé `lm-stock-monitor` (ou `lm-stock-monitor-main`). Déplace-le où tu veux, par ex. sur le **Bureau**, pour le retrouver facilement.
 
 ---
 
-## 3️⃣ Installer le programme (une seule fois)
+## 2️⃣ Installer Python (une seule fois)
 
-Copie-colle cette commande dans le terminal, puis Entrée. Attends que ça finisse (ça peut prendre 1-2 minutes) :
+Python, c'est le moteur qui fait tourner le programme. **Pas besoin de Homebrew** : on prend l'installateur officiel.
+
+- **Windows** : va sur [python.org/downloads](https://www.python.org/downloads/), clique sur le gros bouton jaune **« Download Python »**, lance le fichier téléchargé, et **⚠️ COCHE bien la case « Add Python to PATH »** en bas de la fenêtre **avant** de cliquer sur **« Install Now »**. Cette case est indispensable, ne l'oublie pas.
+- **Mac** : va sur [python.org/downloads](https://www.python.org/downloads/), clique sur **« Download Python »**, ouvre le fichier `.pkg` téléchargé et clique **Continuer / Installer** jusqu'au bout (tu devras taper le mot de passe de ta session).
+
+> Pour vérifier plus tard que c'est bien installé : ouvre le terminal (étape 3) et tape `python --version` (ou `python3 --version`). Si ça affiche un numéro comme `Python 3.12.x`, c'est bon. ✅
+
+---
+
+## 3️⃣ Ouvrir le terminal dans le dossier du projet
+
+Le « terminal », c'est la fenêtre où on tape des commandes.
+
+- **Windows** : ouvre le dossier `lm-stock-monitor` (celui décompressé à l'étape 1), clique dans la **barre d'adresse** tout en haut de la fenêtre, efface ce qu'il y a, tape `cmd` puis Entrée. Une fenêtre noire s'ouvre, déjà placée dans le bon dossier.
+- **Mac** : ouvre l'app **Terminal** (cherche « Terminal » avec Spotlight : ⌘ + Espace, tape « terminal », Entrée). Puis tape `cd ` (les 3 lettres c-d puis un espace), et **glisse-dépose le dossier** `lm-stock-monitor` directement dans la fenêtre du Terminal : son chemin s'écrit tout seul. Appuie sur Entrée.
+
+---
+
+## 4️⃣ Installer le programme (une seule fois)
+
+Copie-colle cette commande dans le terminal, puis Entrée. Attends que ça finisse (ça peut prendre 1-2 minutes, c'est normal que ça défile) :
 
 ```
 pip install -r requirements.txt && python -m camoufox fetch
 ```
 
-> Si `pip` ne marche pas, essaie `pip3` à la place.
+> Si `pip` ne marche pas, essaie `pip3`. Si `python` ne marche pas, essaie `python3`.
 
 ---
 
@@ -66,7 +80,8 @@ Pour tout arrêter : appuie sur **Ctrl + C**.
 
 ## ❓ Petits soucis fréquents
 
-- **« pip / python n'est pas reconnu »** → ajoute un `3` : `pip3`, `python3`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » (étape 1).
-- **Ça plante au premier lancement** → refais l'étape 3, elle installe tout ce qu'il faut.
+- **« pip / python n'est pas reconnu »** → ajoute un `3` : `pip3`, `python3`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » (étape 2), puis **ferme et rouvre** le terminal.
+- **Ça plante au premier lancement** → refais l'étape 4, elle installe tout ce qu'il faut.
+- **Tu ne retrouves pas le dossier dans le terminal** → recommence l'étape 3 (le glisser-déposer sur Mac, ou le `cmd` dans la barre d'adresse sur Windows).
 
 C'est tout. Prends soin de toi et reste au frais. ❄️
