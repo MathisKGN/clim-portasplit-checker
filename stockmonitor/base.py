@@ -28,7 +28,6 @@ from pathlib import Path
 from .common import (
     load_state,
     save_json,
-    sleep_between,
     ts,
     write_csv,
     append_history,
@@ -67,12 +66,13 @@ class ScannerBase(ABC):
     def _emit(self, event_type: str, **payload) -> None:
         """Émet un évènement de progression du scan.
 
-        Types émis par les adapteurs :
+        Types émis par les adapètes :
           scan_start    total_seeds, zone, product_ref, product_url
           warmup        phase ('camoufox'|'session'|'done'), detail
           seed_start    index, total, label
           seed_done     index, total, label, found, new, total_stores, stores_added
           seed_blocked  index, total, label, status
+          pause         seconds, long   (avant sleep inter-seeds)
           remint        reason
           online        available, home_delivery
           scan_done     total_stores, in_stock, blocked, completed, seeds_used
@@ -82,6 +82,22 @@ class ScannerBase(ABC):
                 self._event_handler(event_type, payload)
             except Exception:
                 pass
+
+    def _pause(self, args, long: bool = False) -> None:
+        """Pause animée entre deux seeds — remplace sleep_between.
+
+        Émet un évènement `pause` AVANT de bloquer, pour que le dashboard
+        puisse afficher un compte à rebours pendant le sleep. Le handler
+        repose sur le thread de rafraîchissement Rich Live (qui tourne en
+        parallèle du sleep bloquant).
+        """
+        import random as _r
+        lo, hi = ((args.max_delay, args.max_delay * 2) if long
+                  else (args.min_delay, args.max_delay))
+        secs = _r.uniform(lo, hi)
+        self._emit("pause", seconds=secs, long=long)
+        import time as _t
+        _t.sleep(secs)
 
     @classmethod
     def get_defaults(cls) -> dict:
