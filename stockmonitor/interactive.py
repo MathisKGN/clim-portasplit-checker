@@ -67,8 +67,8 @@ def _pick_lm_zone() -> tuple[str, bool] | None:
         choices=[
             questionary.Choice("IDF (cœur, ~36 magasins, rapide)", value="idf_core"),
             questionary.Choice("IDF élargi (Reims/Troyes/Orléans…)", value="idf_wide"),
-            questionary.Choice("Paris 200 km (~55 magasins ciblés)", value="paris200"),
-            questionary.Choice("France entière (~120 magasins, long)", value="france"),
+            questionary.Choice("Paris 200 km (~50 magasins ciblés)", value="paris200"),
+            questionary.Choice("France entière (~137 magasins, long)", value="france"),
         ],
         use_arrow_keys=True,
     ).ask()

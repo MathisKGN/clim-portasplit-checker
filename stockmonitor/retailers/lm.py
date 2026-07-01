@@ -212,10 +212,10 @@ class LmScanner(ScannerBase):
         zone_name = args.zone
         if zone_name == "france" and SEEDS_FRANCE_FULL:
             seeds = list(SEEDS_FRANCE_FULL)
-            zone = f"France entière ({len(seeds)} seeds, 120 magasins)"
+            zone = f"France entière ({len(seeds)} seeds, 137 magasins)"
         elif zone_name == "paris200" and SEEDS_FRANCE_200KM:
             seeds = list(SEEDS_FRANCE_200KM)
-            zone = "Paris 200 km (55 magasins ciblés)"
+            zone = "Paris 200 km (50 magasins ciblés)"
         elif getattr(args, "wide", False):
             seeds = list(SEEDS_IDF) + list(SEEDS_WIDE)
             zone = "IDF + couronne élargie"

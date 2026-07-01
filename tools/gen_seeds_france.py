@@ -82,7 +82,9 @@ def set_cover(pts, n) -> list[int]:
 
 
 def seed_name(store: dict) -> str:
-    return f'{store["city"]} ({store["cp"][:2]})'
+    # Nommé par commune : les CP de la page produit LM sont peu fiables
+    # (homonymes/erreurs), on ne s'en sert pas pour l'étiquette.
+    return store["city"]
 
 
 def main() -> None:
@@ -99,6 +101,8 @@ def main() -> None:
                     help="libellé de la zone (docstring du fichier généré)")
     ap.add_argument("--center", default="48.8566,2.3522",
                     help="'lat,lon' du centre (ordre core-first)")
+    ap.add_argument("--zone", default="paris200",
+                    help="slug de zone pour la ligne Usage du fichier généré")
     args = ap.parse_args()
 
     center = tuple(float(x) for x in args.center.split(","))
@@ -116,20 +120,24 @@ def main() -> None:
         f"couverture incomplète: {len(covered)}/{len(pts)}"
 
     input_name = Path(args.input).name
+    regen = (f"python3 tools/gen_seeds_france.py --margin {args.margin} "
+             f"--input {args.input} --out {args.out} --var {args.var} "
+             f'--label "{args.label}" --center {args.center} --zone {args.zone}')
     body = f'''"""
 Seeds pour le scan {args.label}.
 
-Généré par set-cover greedy (tools/gen_seeds_france.py --margin {args.margin})
-sur les {len(pts)} magasins uniques de data/{input_name} (dédup par coordonnée).
+Généré par set-cover greedy (tools/gen_seeds_france.py) sur les {len(pts)} magasins
+uniques de data/{input_name} (dédup par coordonnée).
 
 L'endpoint stock LM renvoie les ~11 magasins les plus proches d'un point ; on
 place le minimum de seeds pour que chaque magasin tombe dans le top-11 d'au moins
 un seed — {len(seeds)} seeds au lieu d'un par magasin. Moins de requêtes = scan
 plus rapide et moins de 403 DataDome.
 
-Régénération : python3 tools/gen_seeds_france.py --margin {args.margin}
+Régénération :
+  {regen}
 
-Usage : python -m stockmonitor lm --zone paris200
+Usage : python -m stockmonitor lm --zone {args.zone}
 """
 
 # {len(seeds)} seeds set-cover couvrant les {len(pts)} magasins de la zone.
