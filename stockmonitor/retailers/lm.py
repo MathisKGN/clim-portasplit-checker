@@ -317,7 +317,8 @@ class LmScanner(ScannerBase):
         parser.add_argument("--wide", dest="wide", action="store_true", default=False,
                             help="Ajoute la couronne élargie (Reims/Troyes/Orléans/Auxerre…).")
         parser.add_argument("--stable-rounds", type=int, default=0, metavar="N",
-                            help="Arrêt après N points sans nouveau magasin (mode lent).")
+                            help="Arrêt après N points sans nouveau magasin "
+                                 "(mode lent ET mode HTTP). Défaut: 0 (tous).")
         parser.add_argument("--block-images", dest="block_images", action="store_true", default=True)
         parser.add_argument("--no-block-images", dest="block_images", action="store_false")
         # --- Transport : défaut = HTTP pur (curl_cffi + warmup Camoufox),
@@ -394,12 +395,36 @@ class LmScanner(ScannerBase):
         all_stores: dict = {}
         blocked = 0
         max_blocks = max(1, getattr(args, "max_blocks", 6))
+        stable_rounds = max(0, getattr(args, "stable_rounds", 0))
+        stable = 0
+        # Re-mint du cookie DataDome au plus une fois par scan (cf. chemin
+        # Casto `refreshed` sur 401). On évite ainsi de marteler l'endpoint
+        # avec un cookie mort.
+        refreshed = False
+
+        def _fetch(lat, lon, label):
+            """Fetch un seed, avec re-mint unique sur cookie mort (403).
+
+            Renvoie (status, body). Sur 403/datadome au 1er essai, on re-minte
+            la session Camoufox une fois puis on retente — pas de bouclage.
+            """
+            nonlocal refreshed
+            status, body = sess.fetch_stock(lat, lon)
+            if sess._is_cookie_dead(status, body) and not refreshed:
+                refreshed = True
+                sess.remint()
+                status, body = sess.fetch_stock(lat, lon)
+            return status, body
 
         # Mint = warmup (homepage + fiche produit) + 1 fetch stock au 1er seed.
         # On réutilise le body du mint comme résultat du seed 0 (pas de double
         # hit Paris Centre). Si le mint échoue -> session burned, on arrête.
         first_label, first_lat, first_lon = seeds[0]
         status, body = sess.mint(first_lat, first_lon)
+        if sess._is_cookie_dead(status, body) and not refreshed:
+            refreshed = True
+            sess.remint()
+            status, body = sess.fetch_stock(first_lat, first_lon)
         if status == 200 and "m-store-search-result" in body:
             found = _parse_stores(body)
             new = aggregate(found, all_stores)
@@ -410,12 +435,10 @@ class LmScanner(ScannerBase):
                 blocked += 1
                 if verbose:
                     print(f"    mint/{first_label} bloqué (status={status})")
-            # mint failed = burned probablement. Si IP connue burned, les
-            # fetch_stock suivants retourneront -3 directement.
 
         # Boucle à partir du seed 1 (seed 0 déjà couvert par le mint).
         for i, (label, lat, lon) in enumerate(seeds[1:], 2):
-            status, body = sess.fetch_stock(lat, lon)
+            status, body = _fetch(lat, lon, label)
             if looks_blocked(status, body):
                 blocked += 1
                 if verbose:
@@ -429,10 +452,19 @@ class LmScanner(ScannerBase):
                 new = aggregate(found, all_stores)
                 if verbose:
                     print(f"    {i}/{len(seeds)} {label} : {len(found)} magasins (+{new})")
-            # Cadence courte : fetch_stock fait déjà un GET document + pauses
-            # avant chaque requête, pas besoin d'attente longue entre seeds.
+                # stable-rounds : arrêt dès qu'on enchaîne N seeds sans nouveau
+                # magasin (couverture déjà assurée, inutile de taper tous les
+                # points et de risquer des 403).
+                stable = stable + 1 if new == 0 else 0
+                if stable_rounds and all_stores and stable >= stable_rounds:
+                    if verbose:
+                        print(f"  ◇ stop après {stable_rounds} seeds sans nouveauté "
+                              f"(stable-rounds={stable_rounds})")
+                    break
+            # Cadence large (2-5 s par défaut) : un humain ne scanne pas 36
+            # magasins en 3 min. sleep_between respecte --min/max-delay.
             if i < len(seeds):
-                time.sleep(random.uniform(1.0, 2.0))
+                sleep_between(args)
         return {"stores": all_stores, "blocked": blocked, "seeds": len(seeds),
                 "completed": blocked == 0,
                 "extra": {"zone": zone, "engine": "http"}}

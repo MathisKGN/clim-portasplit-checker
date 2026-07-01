@@ -1,10 +1,21 @@
 """Leroy Merlin — transport HTTP pur (sans navigateur pour le scan).
 
 Une session HTTP (curl_cffi) interroge l'endpoint `store-search-result` pour
-récupérer le stock par magasin. Un warmup initial charge la homepage + la
+récérer le stock par magasin. Un warmup initial charge la homepage + la
 fiche produit pour établir une session valide, puis les requêtes stock sont
 émises. La réponse (fragment HTML) est parsée par le même _parse_stores() que
 le chemin Camoufox. Un seul warmup sert ensuite plusieurs seeds.
+
+Le cookie DataDome est la vraie devise : il est posé par le warmup Camoufox
+puis réutilisé par curl_cffi. Durée de vie courte (~1 h, parfois moins sous
+charge). Préférer le mode `--loop` (un seul process long garde la session
+chaude) plutôt que du cron qui relance un process à chaque cycle → chaque
+relance à froid refait un warmup = moment de vulnérabilité.
+
+Sur 403 / page DataDome en cours de scan, `fetch_stock` ne martèle pas :
+il retourne immédiatement et `_scan_http` déclenche `remint()` (re-warmup
+Camoufox, cookie neuf) une seule fois, comme le chemin Casto refresh son
+token sur 401.
 """
 from __future__ import annotations
 
@@ -58,6 +69,8 @@ class LmHttpSession:
         # (un process par cycle de scan). Sans ça, chaque lancement referait un
         # warmup à froid.
         self.state_path = Path(args.data_dir) / "lm_http_state.json"
+        # Marqueur anti-bouclage : une seule re-mint par fetch_stock.
+        self._reminted = False
         self._load_state()
 
     # --- état disque (cookies, entre lancements) ------------------------- #
@@ -192,11 +205,48 @@ class LmHttpSession:
         return self.s.get(STOCK_URL.format(lat=lat, lon=lon, ref=self.product_ref), headers=sh)
 
     # --- API publique ------------------------------------------------------ #
+    def _is_cookie_dead(self, status: int, body: str) -> bool:
+        """Détecte un cookie DataDome mort (403 ou page interstitielle).
+
+        Sur ces réponses, retenter immédiatement avec le même cookie ne fait
+        qu'aggraver le score anti-bot : il faut re-minter la session.
+        """
+        if status == 403:
+            return True
+        if status == 200:
+            low = body.lower()
+            if "datadome" in low or "captcha" in low:
+                return True
+        return False
+
+    def remint(self) -> None:
+        """Re-minte un cookie DataDome neuf via Camoufox.
+
+        À appeler quand un fetch a renvoyé 403 / page DataDome : le cookie
+        courant est grillé. On purge la jar, marque la session comme non
+        chaude, et relance le warmup Camoufox (homepage + fiche produit).
+        Équivalent du chemin Casto `_get_token(force=True)` sur 401.
+        """
+        if self.verbose:
+            print("    [remint] cookie DataDome mort → re-warmup Camoufox…")
+        try:
+            self.s.cookies.clear()
+        except Exception:
+            pass
+        self.warmed = False
+        self._warmup()
+        # Persister le cookie frais pour les runs suivants (mode cron).
+        self._save_state()
+
     def fetch_stock(self, lat, lon, max_rounds: int = 4):
         """Renvoie (status, body) pour un seed, avec retry sur erreur.
 
         Avant chaque requête stock, on re-GET la fiche produit. En cas
         d'échec, on re-GET et on retente sur plusieurs tours.
+
+        Sur cookie mort (403 / page DataDome), on ne martèle pas l'endpoint :
+        on retourne immédiatement pour que l'appelant déclenche un remint()
+        une seule fois (cf. _scan_http), comme le chemin Casto le fait sur 401.
         """
         r = None
         for attempt in range(max_rounds):
@@ -208,6 +258,9 @@ class LmHttpSession:
             if r.status_code == 200 and "m-store-search-result" in r.text:
                 self._save_state()  # session confirmée -> réutilisable au run suivant
                 return 200, r.text
+            # Cookie mort : ne pas retry avec le même cookie (aggrave le score).
+            if self._is_cookie_dead(r.status_code, r.text):
+                return r.status_code, r.text
             if self.verbose and attempt < max_rounds - 1:
                 print(f"    [{lat:.4f},{lon:.4f}] attempt {attempt+1}/{max_rounds} "
                       f"status={r.status_code}, re-GET document pour retry…")
