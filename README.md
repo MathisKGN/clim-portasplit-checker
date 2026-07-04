@@ -73,11 +73,10 @@ python run.py
 Ensuite, **tu n'as qu'à répondre aux questions** avec les flèches ⬆️⬇️ du clavier et la touche **Entrée** :
 
 1. **Quelle enseigne ?** → Leroy Merlin, Castorama, ou les deux.
-2. **Ton code postal ?** → tape ton code postal (5 chiffres, ex. `59000`).
+2. **Ton code postal ?** → tape ton code postal (5 chiffres, ex. `59000`). Il sera reproposé automatiquement aux prochains lancements.
 3. **Quel rayon ?** → un nombre de km entre 5 et 700 autour de chez toi. Le programme trouve tout seul les magasins dans ce périmètre et calcule le minimum de points à scanner.
-4. **Quel produit ?** → garde celui par défaut (Entrée), ou colle l'adresse d'une autre fiche produit.
-5. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 15 / 30 / 60 min.
-6. **Alerte Telegram ?** → tu peux garder une alerte existante, configurer Telegram avec le token du bot + ton chat id, ou lancer sans alerte.
+4. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 15 / 30 / 60 min.
+5. **Alerte Telegram ?** → tu peux garder une alerte existante, configurer Telegram avec le token du bot + ton chat id, ou lancer sans alerte.
 
 Et c'est parti : un tableau en direct affiche les magasins et lesquels ont du stock. 🟢
 

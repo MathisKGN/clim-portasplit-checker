@@ -7,8 +7,8 @@ Flow
 ----
 1. Bannière de bienvenue.
 2. Choix enseigne.
-3. Pour LM : choix zone (IDF / IDF élargi / Paris 200km / France).
-4. Produit : défaut ou URL custom.
+3. Pour LM : code postal + rayon de scan.
+4. Produit par défaut.
 5. Mode : one-shot ou boucle (intervalle).
 6. Alerte Telegram : garder / configurer / désactiver.
 7. Lancement : dashboard Rich Live qui consomme les events émis par les
