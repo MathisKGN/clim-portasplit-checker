@@ -60,6 +60,25 @@ python install.py
 
 ---
 
+## 🐳 Option Docker (facultatif)
+
+Si tu utilises déjà Docker :
+
+```
+docker build -t lm-stock-monitor .
+docker run --rm -it -v "$PWD/data:/app/data" lm-stock-monitor
+```
+
+Pour lancer directement Leroy Merlin toutes les 5 min :
+
+```
+docker run --rm -it -v "$PWD/data:/app/data" lm-stock-monitor lm --loop 300
+```
+
+Le dossier `data` garde les préférences, cookies de session et alertes.
+
+---
+
 ## 🚀 Lancer le programme
 
 À chaque fois que tu veux surveiller le stock, une seule commande :
@@ -75,10 +94,12 @@ Ensuite, **tu n'as qu'à répondre aux questions** avec les flèches ⬆️⬇�
 1. **Quelle enseigne ?** → Leroy Merlin, Castorama, ou les deux.
 2. **Ton code postal ?** → tape ton code postal (5 chiffres, ex. `59000`). Il sera reproposé automatiquement aux prochains lancements.
 3. **Quel rayon ?** → un nombre de km entre 5 et 700 autour de chez toi. Le programme trouve tout seul les magasins dans ce périmètre et calcule le minimum de points à scanner.
-4. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 15 / 30 / 60 min.
+4. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 1 / 5 / 10 / 15 / 30 / 60 min.
 5. **Alerte Telegram ?** → tu peux garder une alerte existante, configurer Telegram avec le token du bot + ton chat id, ou lancer sans alerte.
 
 Et c'est parti : un tableau en direct affiche les magasins et lesquels ont du stock. 🟢
+
+⚠️ Plus l'intervalle entre deux scans est court, plus tu augmentes les chances d'être ralenti, bloqué ou envoyé vers une protection anti-bot par les sites. 15 min ou plus reste le choix le plus prudent ; 5 min ou moins est plus risqué.
 
 Si tu configures Telegram, le programme peut envoyer un message de test, puis sauvegarder l'alerte pour les prochains lancements. Les alertes ne sont envoyées que pour les nouveaux restocks, pas à chaque boucle si le même magasin reste disponible.
 

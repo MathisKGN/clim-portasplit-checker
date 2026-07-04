@@ -29,6 +29,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .base import ScannerBase
+from .common import short_loop_warning
 from .config import find_config_path, load_config
 from .retailers import REGISTRY
 
@@ -154,24 +155,41 @@ def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
         return seeds, label
 
 
-def _pick_loop() -> tuple[int, int] | None:
-    """Renvoie (loop_seconds, 0=one-shot)."""
+def _pick_loop() -> int | None:
+    """Renvoie l'intervalle de boucle en secondes (0 = one-shot)."""
     import questionary
-    mode = questionary.select(
-        "Mode d'exécution ?",
-        choices=[
-            questionary.Choice("One-shot (un scan puis stop)", value="one"),
-            questionary.Choice("Boucle — 15 min", value="900"),
-            questionary.Choice("Boucle — 30 min", value="1800"),
-            questionary.Choice("Boucle — 60 min", value="3600"),
-        ],
-        use_arrow_keys=True,
-    ).ask()
-    if mode is None:
-        return None
-    if mode == "one":
-        return 0, 0
-    return int(mode), int(mode)
+    from rich.console import Console
+
+    console = Console()
+
+    while True:
+        mode = questionary.select(
+            "Mode d'exécution ?",
+            choices=[
+                questionary.Choice("One-shot (un scan puis stop)", value=0),
+                questionary.Choice("Boucle — 1 min (très risqué)", value=60),
+                questionary.Choice("Boucle — 5 min (risqué)", value=300),
+                questionary.Choice("Boucle — 10 min (risqué)", value=600),
+                questionary.Choice("Boucle — 15 min", value=900),
+                questionary.Choice("Boucle — 30 min", value=1800),
+                questionary.Choice("Boucle — 60 min", value=3600),
+            ],
+            use_arrow_keys=True,
+        ).ask()
+        if mode is None:
+            return None
+        if 0 < mode < 900:
+            console.print(f"  [yellow]{short_loop_warning(mode)}[/]")
+            ok = questionary.confirm(
+                "Continuer quand même ?",
+                default=False,
+            ).ask()
+            if ok is None:
+                return None
+            if not ok:
+                continue
+
+        return mode
 
 
 def _quote_sh(value: str) -> str:
@@ -767,10 +785,9 @@ def main() -> int:
             break
 
     # 4. Mode boucle
-    loop_pick = _pick_loop()
-    if loop_pick is None:
+    loop_sec = _pick_loop()
+    if loop_sec is None:
         return 1
-    loop_sec, _ = loop_pick
     overrides["loop"] = loop_sec
 
     # 5. Alerte Telegram

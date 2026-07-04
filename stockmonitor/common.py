@@ -23,6 +23,16 @@ def ts() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def short_loop_warning(seconds: int) -> str:
+    """Message d'avertissement pour les boucles trop rapprochées."""
+    label = f"{seconds // 60} min" if seconds % 60 == 0 else f"{seconds} s"
+    return (
+        f"Attention : intervalle de {label}. "
+        "Plus l'intervalle est court, plus tu augmentes les chances d'être "
+        "bloqué par les protections anti-bot des sites."
+    )
+
+
 # --------------------------------------------------------------------------- #
 # I/O JSON / CSV / state
 # --------------------------------------------------------------------------- #

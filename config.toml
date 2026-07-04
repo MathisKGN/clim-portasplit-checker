@@ -5,7 +5,8 @@
 
 [common]
 data_dir    = "data"     # dossier sorties + cache + état
-loop        = 900        # auto-boucle toutes les N sec (0 = one-shot). 900 = 15 min.
+loop        = 900        # auto-boucle toutes les N sec (0 = one-shot). 900 = 15 min conseillé.
+# Plus l'intervalle est court, plus le risque de blocage anti-bot augmente.
 notify_cmd  = ""         # commande shell exécutée si restock
 verbose     = false
 

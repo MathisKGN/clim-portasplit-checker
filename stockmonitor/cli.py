@@ -31,6 +31,7 @@ import time
 from pathlib import Path
 
 from .base import ScannerBase
+from .common import short_loop_warning
 from .config import load_config
 from .retailers import REGISTRY
 
@@ -67,7 +68,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--data-dir", default=None, metavar="PATH",
                         help="Dossier sorties + cache/token/profil (defaut: ./data).")
     parser.add_argument("--loop", type=int, default=None, metavar="SECONDES",
-                        help="Auto-boucle toutes les N sec (0 = one-shot, defaut: 900).")
+                        help="Auto-boucle toutes les N sec (0 = one-shot, defaut: 900). "
+                             "Plus N est bas, plus le risque anti-bot augmente.")
     parser.add_argument("--notify-cmd", default=None, metavar="SH",
                         help="Commande shell exécutée si restock "
                              "(env: <PREFIX>_MESSAGE, <PREFIX>_STORES, …).")
@@ -160,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     _fallback(args, "loop", 900, cfg.get("common", {}))
     _fallback(args, "notify_cmd", "", cfg.get("common", {}))
     _fallback(args, "verbose", False, cfg.get("common", {}))
+    _warn_loop_interval(args.loop)
     Path(args.data_dir).mkdir(parents=True, exist_ok=True)
 
     if args.retailer == "all":
@@ -184,6 +187,12 @@ def _fallback(args, key: str, hard_default, cfg_section: dict) -> None:
         setattr(args, key, val)
         return
     setattr(args, key, hard_default)
+
+
+def _warn_loop_interval(loop_seconds: int | None) -> None:
+    """Affiche un avertissement clair quand la boucle est très rapprochée."""
+    if loop_seconds and 0 < loop_seconds < 900:
+        print(f"⚠ {short_loop_warning(loop_seconds)}")
 
 
 def _namespace_for_scanner(scanner: ScannerBase, args, cfg: dict) -> argparse.Namespace:
