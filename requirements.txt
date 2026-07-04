@@ -22,3 +22,4 @@ requests>=2.31
 # Interface interactive + rendu temps réel (python -m stockmonitor sans args)
 rich>=13.7
 questionary>=2.1
+tomli>=2.0; python_version < "3.11"
