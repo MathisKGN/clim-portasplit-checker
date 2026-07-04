@@ -107,6 +107,27 @@ Pour tout arrêter : appuie sur **Ctrl + C**.
 
 ---
 
+## 🧪 Développement / tests
+
+Les tests sont offline : ils valident les parseurs, la config, la persistance et
+les alertes sans appeler les sites surveillés.
+
+Installation des dépendances de test :
+
+```
+.venv/bin/python -m pip install -r requirements-dev.txt
+```
+
+Lancement :
+
+```
+.venv/bin/python -m pytest
+```
+
+Sur Windows, remplace `.venv/bin/python` par `.venv\Scripts\python.exe`.
+
+---
+
 ## ❓ Petits soucis fréquents
 
 - **« python n'est pas reconnu »** → essaie `python3 install.py` puis `python3 run.py`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » sur Windows, puis **ferme et rouvre** le terminal.
