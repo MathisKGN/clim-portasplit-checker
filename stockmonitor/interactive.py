@@ -79,52 +79,54 @@ def _pick_lm_area() -> tuple[list, str] | None:
 
     console = Console()
 
-    cp = questionary.text(
-        "Ton code postal (autour duquel scanner) ?",
-        validate=lambda s: (s.strip().isdigit() and len(s.strip()) == 5)
-        or "Code postal invalide (5 chiffres, ex. 59000)",
-    ).ask()
-    if cp is None:
-        return None
+    while True:
+        cp = questionary.text(
+            "Ton code postal (autour duquel scanner) ?",
+            validate=lambda s: (s.strip().isdigit() and len(s.strip()) == 5)
+            or "Code postal invalide (5 chiffres, ex. 59000)",
+        ).ask()
+        if cp is None:
+            return None
+        cp = cp.strip()
 
-    radius = questionary.text(
-        "Rayon de scan en km (entre 5 et 700) ?",
-        default="100",
-        validate=lambda s: (s.strip().isdigit() and 5 <= int(s.strip()) <= 700)
-        or "Entre un nombre entre 5 et 700",
-    ).ask()
-    if radius is None:
-        return None
-    radius_km = int(radius.strip())
+        radius = questionary.text(
+            "Rayon de scan en km (entre 5 et 700) ?",
+            default="",
+            validate=lambda s: (s.strip().isdigit() and 5 <= int(s.strip()) <= 700)
+            or "Entre un nombre entre 5 et 700",
+        ).ask()
+        if radius is None:
+            return None
+        radius_km = int(radius.strip())
 
-    console.print(f"  [dim]Géolocalisation du {cp.strip()}…[/]")
-    center = geocode_cp(cp.strip())
-    if center is None:
-        console.print("  [red]Code postal introuvable (ou pas de réseau).[/] "
-                      "Réessaie.")
-        return _pick_lm_area()
+        console.print(f"  [dim]Géolocalisation du {cp}…[/]")
+        center = geocode_cp(cp)
+        if center is None:
+            console.print("  [red]Code postal introuvable (ou pas de réseau).[/] "
+                          "Réessaie.")
+            continue
 
-    console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
-    try:
-        seeds, n_stores = compute_seeds(center, radius_km)
-    except Exception as e:
+        console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
+        try:
+            seeds, n_stores = compute_seeds(center, radius_km)
+        except Exception as e:
+            console.print(
+                "  [red]Impossible de charger la liste des magasins Leroy Merlin.[/] "
+                f"[dim]{e}[/]\n"
+                "  Vérifie ta connexion puis relance le programme."
+            )
+            return None
+        if not seeds:
+            console.print(
+                f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "
+                f"{radius_km} km.[/] Élargis le rayon.")
+            continue
+
+        label = f"{cp} · {radius_km} km ({n_stores} magasins)"
         console.print(
-            "  [red]Impossible de charger la liste des magasins Leroy Merlin.[/] "
-            f"[dim]{e}[/]\n"
-            "  Vérifie ta connexion puis relance le programme."
-        )
-        return None
-    if not seeds:
-        console.print(
-            f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "
-            f"{radius_km} km.[/] Élargis le rayon.")
-        return _pick_lm_area()
-
-    label = f"{cp.strip()} · {radius_km} km ({n_stores} magasins)"
-    console.print(
-        f"  [green]✓[/] {n_stores} magasins couverts par "
-        f"[bold]{len(seeds)} point(s)[/] de scan.")
-    return seeds, label
+            f"  [green]✓[/] {n_stores} magasins couverts par "
+            f"[bold]{len(seeds)} point(s)[/] de scan.")
+        return seeds, label
 
 
 def _pick_loop() -> tuple[int, int] | None:
