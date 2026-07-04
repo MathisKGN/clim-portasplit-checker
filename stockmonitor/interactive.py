@@ -127,23 +127,6 @@ def _pick_lm_area() -> tuple[list, str] | None:
     return seeds, label
 
 
-def _pick_product(default_url: str) -> str | None:
-    import questionary
-    use_default = questionary.confirm(
-        f"Garder le produit par défaut ?\n  {default_url}",
-        default=True,
-    ).ask()
-    if use_default is None:
-        return None
-    if use_default:
-        return default_url
-    url = questionary.text(
-        "Colle l'URL de la fiche produit :",
-        validate=lambda s: s.startswith("http") or "URL invalide",
-    ).ask()
-    return url
-
-
 def _pick_loop() -> tuple[int, int] | None:
     """Renvoie (loop_seconds, 0=one-shot)."""
     import questionary
@@ -740,7 +723,7 @@ def main() -> int:
         cls = REGISTRY[retailer_key]
         scanners = [cls()]
 
-    # 3. Zone (LM uniquement) + produit
+    # 3. Zone (LM uniquement)
     for sc in scanners:
         if sc.CONFIG_KEY == "lm":
             area = _pick_lm_area()
@@ -749,15 +732,6 @@ def main() -> int:
             overrides["custom_seeds"], overrides["zone_label"] = area
             overrides["zone"] = area[1]
             break
-
-    # Produit : on prend l'URL par défaut du premier scanner concerné.
-    target = scanners[0]
-    default_url = target.DEFAULT_PRODUCT_URL
-    product_url = _pick_product(default_url)
-    if product_url is None:
-        return 1
-    if product_url != default_url:
-        overrides["product_url"] = product_url
 
     # 4. Mode boucle
     loop_pick = _pick_loop()
