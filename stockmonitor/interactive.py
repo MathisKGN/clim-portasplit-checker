@@ -67,7 +67,30 @@ def _pick_retailer() -> str | None:
     ).ask()
 
 
-def _pick_lm_area() -> tuple[list, str] | None:
+def _prefs_path(data_dir: str | Path) -> Path:
+    return Path(data_dir) / "interactive_prefs.json"
+
+
+def _load_last_postcode(data_dir: str | Path) -> str | None:
+    path = _prefs_path(data_dir)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    cp = str(data.get("postcode", "")).strip()
+    if cp.isdigit() and len(cp) == 5:
+        return cp
+    return None
+
+
+def _save_last_postcode(data_dir: str | Path, postcode: str) -> None:
+    path = _prefs_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {"postcode": postcode.strip()}
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
     """Demande un code postal + un rayon, calcule les seeds à la volée.
 
     Renvoie (seeds, zone_label) où seeds est une liste de (label, lat, lon).
@@ -78,10 +101,12 @@ def _pick_lm_area() -> tuple[list, str] | None:
     from .seeds_dynamic import geocode_cp, compute_seeds
 
     console = Console()
+    default_cp = _load_last_postcode(data_dir) or ""
 
     while True:
         cp = questionary.text(
             "Ton code postal (autour duquel scanner) ?",
+            default=default_cp,
             validate=lambda s: (s.strip().isdigit() and len(s.strip()) == 5)
             or "Code postal invalide (5 chiffres, ex. 59000)",
         ).ask()
@@ -104,7 +129,10 @@ def _pick_lm_area() -> tuple[list, str] | None:
         if center is None:
             console.print("  [red]Code postal introuvable (ou pas de réseau).[/] "
                           "Réessaie.")
+            default_cp = cp
             continue
+        _save_last_postcode(data_dir, cp)
+        default_cp = cp
 
         console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
         try:
@@ -728,7 +756,7 @@ def main() -> int:
     # 3. Zone (LM uniquement)
     for sc in scanners:
         if sc.CONFIG_KEY == "lm":
-            area = _pick_lm_area()
+            area = _pick_lm_area(data_dir)
             if area is None:
                 return 1
             overrides["custom_seeds"], overrides["zone_label"] = area
