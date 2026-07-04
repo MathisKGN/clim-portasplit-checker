@@ -6,7 +6,7 @@ Prompts flèches (questionary) + dashboard temps réel (Rich Live) qui se met
 Flow
 ----
 1. Bannière de bienvenue.
-2. Choix enseigne (LM / Casto / les deux).
+2. Choix enseigne.
 3. Pour LM : choix zone (IDF / IDF élargi / Paris 200km / France).
 4. Produit : défaut ou URL custom.
 5. Mode : one-shot ou boucle (intervalle).
@@ -53,7 +53,9 @@ def _pick_retailer() -> str | None:
         choices=[
             questionary.Choice("Leroy Merlin", value="lm"),
             questionary.Choice("Castorama", value="casto"),
-            questionary.Choice("Les deux (en séquence)", value="all"),
+            questionary.Choice("ManoMano", value="manomano"),
+            questionary.Choice("Darty", value="darty"),
+            questionary.Choice("Toutes (en séquence)", value="all"),
         ],
         use_arrow_keys=True,
     ).ask()

@@ -38,3 +38,17 @@ min_delay = 0.8
 max_delay = 2.0
 stable_rounds = 3
 token_ttl = 21600            # 6 h — réutilisation du token caché
+
+[manomano]
+# Produit — scan fiche produit en ligne (Cloudflare observé, pas DataDome).
+product_ref = "83810402"
+product_url = "https://www.manomano.fr/p/midea-climatiseur-split-mobile-reversible-froid-chaud-3500w12000btu-wifi-deshumidificateur-ventilateur-jusqua-40m2-kit-fenetre-inclus-83810402"
+min_delay = 1.0
+max_delay = 2.0
+
+[darty]
+# Produit — scan fiche produit en ligne (Queue-it/Akamai observé, pas DataDome).
+product_ref = "7970579"
+product_url = "https://www.darty.com/nav/achat/gros_electromenager/chauffage_climatisation/climatiseur/midea_mmcs-12hrn8-qrd0.html"
+min_delay = 1.0
+max_delay = 2.0

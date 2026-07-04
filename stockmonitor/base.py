@@ -374,13 +374,13 @@ class ScannerBase(ABC):
         À appeler une fois avant run_cycle / _run_loop.
         """
         from .config import merge_config_into_args
-        # 1/ defaults codés (priorité basse)
+        # 1/ config.toml (surclasse les defaults codés, pas la CLI)
+        merge_config_into_args(args, cfg, self.CONFIG_KEY or self.prefix)
+        # 2/ defaults codés (priorité basse)
         for k, v in self.get_defaults().items():
             if getattr(args, k, None) is None:
                 setattr(args, k, v)
-        # 2/ config.toml (surclasse les defaults codés, pas la CLI)
-        merge_config_into_args(args, cfg, self.CONFIG_KEY or self.prefix)
-        # 3/ substitue les placeholders produit si la CLI n'a rien passé
+        # 3/ substitue les placeholders produit si config/defaults n'ont rien passé
         if getattr(args, "product_ref", None) is None:
             args.product_ref = self.DEFAULT_PRODUCT_REF
         if getattr(args, "product_url", None) is None:

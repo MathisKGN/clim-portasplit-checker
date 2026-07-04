@@ -4,7 +4,7 @@ Architecture
 ------------
   stockmonitor.common   : utils partagés (ts, json, http, dédup, etc.).
   stockmonitor.base     : ScannerBase — report / alerts / persist / boucle.
-  stockmonitor.retailers : un adapteur par enseigne (lm, casto, darty, amazon).
+  stockmonitor.retailers : un adapteur par enseigne (lm, casto, manomano, darty).
   stockmonitor.cli       : point d'entrée CLI unifié (`python -m stockmonitor`).
   monitor.py            : wrapper racine (`python monitor.py <retailer>`).
 

@@ -4,6 +4,8 @@ Usage
 -----
   python -m stockmonitor lm            # boucle Leroy Merlin (défaut 900 s)
   python -m stockmonitor casto         # boucle Castorama
+  python -m stockmonitor manomano      # fiche produit ManoMano
+  python -m stockmonitor darty         # fiche produit Darty
   python -m stockmonitor all           # tous les adapteurs, en séquence
 
   python -m stockmonitor lm --product-ref 12345678 --product-url https://...
@@ -80,7 +82,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="stockmonitor",
-        description="Moniteur de stock multi-enseignes (Leroy Merlin, Castorama).",
+        description="Moniteur de stock multi-enseignes.",
         usage="python -m stockmonitor <retailer> [options]\n"
               "       python -m stockmonitor all [options]",
     )

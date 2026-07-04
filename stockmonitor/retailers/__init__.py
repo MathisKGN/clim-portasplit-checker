@@ -9,12 +9,16 @@ from __future__ import annotations
 from ..base import ScannerBase
 from .lm import LmScanner
 from .casto import CastoScanner
+from .manomano import ManoManoScanner
+from .darty import DartyScanner
 
 REGISTRY: dict[str, type[ScannerBase]] = {
-    "lm":      LmScanner,
-    "casto":   CastoScanner,
+    "lm":         LmScanner,
+    "casto":      CastoScanner,
+    "manomano":   ManoManoScanner,
+    "darty":      DartyScanner,
     "leroymerlin": LmScanner,
-    "castorama":  CastoScanner,
+    "castorama":   CastoScanner,
 }
 
 __all__ = ["REGISTRY", "ScannerBase"]
