@@ -10,6 +10,11 @@ lxml>=5.0
 # (erreur "viewport.isMobile not described in this scheme"). On épingle 1.50.0.
 camoufox[geoip]>=0.4.11
 playwright==1.50.0
+# Le Python 3.9 fourni par les Command Line Tools d'Apple peut choisir
+# PyObjC 12, version retiree qui annonce a tort supporter Python 3.9, puis
+# echoue a compiler. On reste sur la derniere serie compatible.
+pyobjc-core<12; sys_platform == "darwin" and python_version < "3.10"
+pyobjc-framework-Cocoa<12; sys_platform == "darwin" and python_version < "3.10"
 
 # Castorama / Darty / Amazon : API JSON, aucun navigateur requis (a priori)
 requests>=2.31

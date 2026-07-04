@@ -47,10 +47,16 @@ Le « terminal », c'est la fenêtre où on tape des commandes.
 Copie-colle cette commande dans le terminal, puis Entrée. Attends que ça finisse (ça peut prendre 1-2 minutes, c'est normal que ça défile) :
 
 ```
-pip install -r requirements.txt && python -m camoufox fetch
+python install.py
 ```
 
-> Si `pip` ne marche pas, essaie `pip3`. Si `python` ne marche pas, essaie `python3`.
+> Si `python` ne marche pas, essaie `python3` :
+>
+> ```
+> python3 install.py
+> ```
+>
+> Le script s'occupe tout seul de créer l'environnement isolé, d'installer les dépendances et de télécharger le navigateur nécessaire.
 
 ---
 
@@ -59,10 +65,10 @@ pip install -r requirements.txt && python -m camoufox fetch
 À chaque fois que tu veux surveiller le stock, une seule commande :
 
 ```
-python -m stockmonitor
+python run.py
 ```
 
-> Si `python` ne marche pas, essaie `python3`.
+> Si `python` ne marche pas, essaie `python3 run.py`.
 
 Ensuite, **tu n'as qu'à répondre aux questions** avec les flèches ⬆️⬇️ du clavier et la touche **Entrée** :
 
