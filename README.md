@@ -1,6 +1,8 @@
 # stockmonitor 🌬️
 
-Surveille le stock d'un climatiseur (Leroy Merlin / Castorama) dans les magasins près de chez toi, et te prévient quand il revient en stock.
+TUI interactif pour surveiller le stock d'un climatiseur dans les magasins près de chez toi, et te prévenir quand il revient en stock.
+
+Le parcours normal est volontairement simple : tu lances `python run.py`, tu choisis l'enseigne dans l'interface, puis le tableau de suivi se met à jour en direct. Les commandes par enseigne comme `lm` existent encore pour les usages avancés, mais ce n'est pas le chemin principal.
 
 > Codé avec passion, uniquement à but de recherche et d'information — pour donner un coup de main à celles et ceux qui galèrent à trouver une clim, et surtout aux personnes les plus vulnérables face à la canicule. 🙏
 
@@ -18,7 +20,7 @@ On part **de zéro** : pas de Python, pas de Homebrew, rien du tout. Tu n'as **r
 
 1. En haut de cette page (sur GitHub), clique sur le bouton vert **« Code »**, puis **« Download ZIP »**.
 2. Ouvre le fichier `.zip` téléchargé (généralement dans ton dossier **Téléchargements**) pour le décompresser.
-3. Tu obtiens un dossier nommé `lm-stock-monitor` (ou `lm-stock-monitor-main`). Déplace-le où tu veux, par ex. sur le **Bureau**, pour le retrouver facilement.
+3. Tu obtiens un dossier de projet, souvent nommé `lm-stock-monitor` ou `lm-stock-monitor-main` selon le nom du dépôt téléchargé. Déplace-le où tu veux, par ex. sur le **Bureau**, pour le retrouver facilement.
 
 ---
 
@@ -37,8 +39,8 @@ Python, c'est le moteur qui fait tourner le programme. **Pas besoin de Homebrew*
 
 Le « terminal », c'est la fenêtre où on tape des commandes.
 
-- **Windows** : ouvre le dossier `lm-stock-monitor` (celui décompressé à l'étape 1), clique dans la **barre d'adresse** tout en haut de la fenêtre, efface ce qu'il y a, tape `cmd` puis Entrée. Une fenêtre noire s'ouvre, déjà placée dans le bon dossier.
-- **Mac** : ouvre l'app **Terminal** (cherche « Terminal » avec Spotlight : ⌘ + Espace, tape « terminal », Entrée). Puis tape `cd ` (les 3 lettres c-d puis un espace), et **glisse-dépose le dossier** `lm-stock-monitor` directement dans la fenêtre du Terminal : son chemin s'écrit tout seul. Appuie sur Entrée.
+- **Windows** : ouvre le dossier du projet (celui décompressé à l'étape 1), clique dans la **barre d'adresse** tout en haut de la fenêtre, efface ce qu'il y a, tape `cmd` puis Entrée. Une fenêtre noire s'ouvre, déjà placée dans le bon dossier.
+- **Mac** : ouvre l'app **Terminal** (cherche « Terminal » avec Spotlight : ⌘ + Espace, tape « terminal », Entrée). Puis tape `cd ` (les 3 lettres c-d puis un espace), et **glisse-dépose le dossier du projet** directement dans la fenêtre du Terminal : son chemin s'écrit tout seul. Appuie sur Entrée.
 
 ---
 
@@ -65,14 +67,14 @@ python install.py
 Si tu utilises déjà Docker :
 
 ```
-docker build -t lm-stock-monitor .
-docker run --rm -it -v "$PWD/data:/app/data" lm-stock-monitor
+docker build -t stockmonitor .
+docker run --rm -it -v "$PWD/data:/app/data" stockmonitor
 ```
 
-Pour lancer directement Leroy Merlin toutes les 5 min :
+Le conteneur ouvre lui aussi le TUI interactif par défaut. Pour un usage avancé en CLI directe, tu peux encore cibler une enseigne, par exemple Leroy Merlin toutes les 5 min :
 
 ```
-docker run --rm -it -v "$PWD/data:/app/data" lm-stock-monitor lm --loop 300
+docker run --rm -it -v "$PWD/data:/app/data" stockmonitor lm --loop 300
 ```
 
 Le dossier `data` garde les préférences, cookies de session et alertes.
@@ -81,7 +83,7 @@ Le dossier `data` garde les préférences, cookies de session et alertes.
 
 ## 🚀 Lancer le programme
 
-À chaque fois que tu veux surveiller le stock, une seule commande :
+À chaque fois que tu veux surveiller le stock, une seule commande ouvre le TUI interactif :
 
 ```
 python run.py
@@ -105,6 +107,16 @@ Si tu configures Telegram, le programme peut envoyer un message de test, puis sa
 
 Pour tout arrêter : appuie sur **Ctrl + C**.
 
+### CLI avancée
+
+Le TUI est le lancement recommandé. Si tu veux automatiser ou lancer une enseigne précise sans questions interactives, la CLI legacy reste disponible :
+
+```
+python run.py lm --loop 900
+python run.py casto --loop 900
+python run.py all --loop 900
+```
+
 ---
 
 ## 🧪 Développement / tests
@@ -125,6 +137,14 @@ Lancement :
 ```
 
 Sur Windows, remplace `.venv/bin/python` par `.venv\Scripts\python.exe`.
+
+---
+
+## 📄 Licence
+
+Ce projet est distribué sous licence **GNU GPL v3 ou ultérieure** (`GPL-3.0-or-later`).
+
+En clair : tu peux utiliser, modifier et redistribuer le code, y compris des versions modifiées, mais les redistributions doivent garder les mêmes libertés et fournir le code source correspondant.
 
 ---
 
