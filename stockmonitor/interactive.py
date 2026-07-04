@@ -10,19 +10,25 @@ Flow
 3. Pour LM : choix zone (IDF / IDF élargi / Paris 200km / France).
 4. Produit : défaut ou URL custom.
 5. Mode : one-shot ou boucle (intervalle).
-6. Lancement : dashboard Rich Live qui consomme les events émis par les
+6. Alerte Telegram : garder / configurer / désactiver.
+7. Lancement : dashboard Rich Live qui consomme les events émis par les
    scanners et rend les magasins au fur et à mesure.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
+import re
+import stat
 import sys
 import time
 from pathlib import Path
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from .base import ScannerBase
-from .config import load_config
+from .config import find_config_path, load_config
 from .retailers import REGISTRY
 
 
@@ -147,6 +153,187 @@ def _pick_loop() -> tuple[int, int] | None:
     if mode == "one":
         return 0, 0
     return int(mode), int(mode)
+
+
+def _quote_sh(value: str) -> str:
+    """Quote POSIX simple pour écrire des secrets dans le hook local."""
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def _telegram_script_path(data_dir: str) -> Path:
+    base = Path(data_dir)
+    if not base.is_absolute():
+        base = Path.cwd() / base
+    return base.resolve() / "telegram_notify.sh"
+
+
+def _telegram_notify_cmd(data_dir: str) -> str | None:
+    script = _telegram_script_path(data_dir)
+    if script.exists():
+        return str(script)
+    return None
+
+
+def _write_telegram_hook(data_dir: str, token: str, chat_id: str) -> Path:
+    """Écrit un hook Telegram local, privé, consommé par ScannerBase.notify()."""
+    script = _telegram_script_path(data_dir)
+    script.parent.mkdir(parents=True, exist_ok=True)
+    content = f"""#!/usr/bin/env bash
+set -u
+
+TELEGRAM_BOT_TOKEN={_quote_sh(token)}
+TELEGRAM_CHAT_ID={_quote_sh(chat_id)}
+
+MESSAGE="${{LM_MESSAGE:-${{CASTO_MESSAGE:-${{MANOMANO_MESSAGE:-${{DARTY_MESSAGE:-${{WEB_MESSAGE:-}}}}}}}}}}"
+
+if [ -z "${{MESSAGE}}" ]; then
+  exit 0
+fi
+
+curl -sS -X POST "https://api.telegram.org/bot${{TELEGRAM_BOT_TOKEN}}/sendMessage" \\
+  --data-urlencode "chat_id=${{TELEGRAM_CHAT_ID}}" \\
+  --data-urlencode "text=${{MESSAGE}}" >/dev/null
+"""
+    script.write_text(content, encoding="utf-8")
+    script.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
+    return script
+
+
+def _send_telegram_test(token: str, chat_id: str) -> tuple[bool, str]:
+    data = urlencode({
+        "chat_id": chat_id,
+        "text": "Test stockmonitor : l'alerte Telegram est configurée.",
+    }).encode("utf-8")
+    req = Request(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=data,
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=15) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        return False, str(e)
+    if payload.get("ok"):
+        return True, "Message de test envoyé."
+    return False, payload.get("description", "Réponse Telegram invalide.")
+
+
+def _save_notify_cmd_to_config(notify_cmd: str) -> bool:
+    """Persiste common.notify_cmd dans config.toml sans dépendance d'écriture TOML."""
+    path = find_config_path()
+    if not path:
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+
+    toml_notify_cmd = notify_cmd.replace("\\", "\\\\").replace('"', '\\"')
+    lines = text.splitlines()
+    out: list[str] = []
+    in_common = False
+    common_seen = False
+    written = False
+
+    for line in lines:
+        section = re.match(r"\s*\[([^\]]+)\]\s*$", line)
+        if section:
+            if in_common and not written:
+                out.append(f'notify_cmd  = "{toml_notify_cmd}"')
+                written = True
+            in_common = section.group(1).strip() == "common"
+            common_seen = common_seen or in_common
+            out.append(line)
+            continue
+
+        if in_common and re.match(r"\s*notify_cmd\s*=", line):
+            out.append(f'notify_cmd  = "{toml_notify_cmd}"')
+            written = True
+            continue
+        out.append(line)
+
+    if in_common and not written:
+        out.append(f'notify_cmd  = "{toml_notify_cmd}"')
+        written = True
+    if not common_seen:
+        if out and out[-1].strip():
+            out.append("")
+        out.extend(["[common]", f'notify_cmd  = "{toml_notify_cmd}"'])
+        written = True
+
+    if not written:
+        return False
+    try:
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    except Exception:
+        return False
+    return True
+
+
+def _pick_telegram_alert(data_dir: str, cfg: dict) -> str | None:
+    """Configure l'alerte Telegram depuis le TUI et renvoie notify_cmd."""
+    import questionary
+    from rich.console import Console
+
+    console = Console()
+    existing = _telegram_notify_cmd(data_dir)
+    configured = existing or (cfg.get("common", {}) or {}).get("notify_cmd")
+    choices = []
+    if configured:
+        choices.append(questionary.Choice("Garder l'alerte déjà configurée",
+                                          value="keep"))
+    choices.extend([
+        questionary.Choice("Configurer Telegram maintenant", value="setup"),
+        questionary.Choice("Pas d'alerte Telegram", value="none"),
+    ])
+    mode = questionary.select(
+        "Alerte quand un nouveau stock apparaît ?",
+        choices=choices,
+        use_arrow_keys=True,
+    ).ask()
+    if mode is None:
+        return None
+    if mode == "none":
+        return ""
+    if mode == "keep":
+        return str(configured)
+
+    console.print("  [dim]Crée un bot avec @BotFather, puis récupère ton chat id "
+                  "avec @userinfobot.[/]")
+    token = questionary.password(
+        "Token du bot Telegram :",
+        validate=lambda s: bool(s.strip()) or "Token requis",
+    ).ask()
+    if token is None:
+        return None
+    chat_id = questionary.text(
+        "Chat ID Telegram :",
+        validate=lambda s: bool(s.strip()) or "Chat ID requis",
+    ).ask()
+    if chat_id is None:
+        return None
+
+    script = _write_telegram_hook(data_dir, token.strip(), chat_id.strip())
+    console.print(f"  [green]✓[/] Hook Telegram créé : [bold]{script}[/]")
+
+    test = questionary.confirm("Envoyer un message de test ?", default=True).ask()
+    if test:
+        ok, detail = _send_telegram_test(token.strip(), chat_id.strip())
+        style = "green" if ok else "yellow"
+        console.print(f"  [{style}]{detail}[/]")
+
+    save = questionary.confirm(
+        "Sauvegarder cette alerte pour les prochains lancements ?",
+        default=True,
+    ).ask()
+    if save:
+        if _save_notify_cmd_to_config(str(script)):
+            console.print("  [green]✓[/] config.toml mis à jour.")
+        else:
+            console.print("  [yellow]Impossible de mettre à jour config.toml ; "
+                          "l'alerte reste active pour ce lancement.[/]")
+    return str(script)
 
 
 # --------------------------------------------------------------------------- #
@@ -570,7 +757,13 @@ def main() -> int:
     loop_sec, _ = loop_pick
     overrides["loop"] = loop_sec
 
-    # 5. Exécution
+    # 5. Alerte Telegram
+    notify_cmd = _pick_telegram_alert(data_dir, cfg)
+    if notify_cmd is None:
+        return 1
+    overrides["notify_cmd"] = notify_cmd
+
+    # 6. Exécution
     state: dict = {
         "phase": "idle", "retailer": ", ".join(s.RETAILER_NAME for s in scanners),
         "zone": overrides.get("zone", ""), "product_ref": "",
