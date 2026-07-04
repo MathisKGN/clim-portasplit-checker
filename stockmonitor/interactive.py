@@ -104,7 +104,16 @@ def _pick_lm_area() -> tuple[list, str] | None:
                       "Réessaie.")
         return _pick_lm_area()
 
-    seeds, n_stores = compute_seeds(center, radius_km)
+    console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
+    try:
+        seeds, n_stores = compute_seeds(center, radius_km)
+    except Exception as e:
+        console.print(
+            "  [red]Impossible de charger la liste des magasins Leroy Merlin.[/] "
+            f"[dim]{e}[/]\n"
+            "  Vérifie ta connexion puis relance le programme."
+        )
+        return None
     if not seeds:
         console.print(
             f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "

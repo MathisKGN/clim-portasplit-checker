@@ -13,12 +13,25 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-# data/lm_stores.json est committé à la racine du projet.
+# data/lm_stores.json est un cache local. Il n'est pas forcément présent chez
+# les utilisateurs qui téléchargent le ZIP GitHub, donc on sait le recréer.
 _STORES_PATH = Path(__file__).resolve().parent.parent / "data" / "lm_stores.json"
+
+WOOSMAP_KEY = "woos-47262215-fc76-3bd2-8e0d-d8fda2544349"
+WOOSMAP_URL = (
+    "https://api.woosmap.com/stores/search/"
+    "?key={key}&lat=46.6&lng=2.4&max_distance=3000000&stores_by_page=300&page={page}"
+)
+WOOSMAP_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Referer": "https://www.leroymerlin.fr/",
+    "Origin": "https://www.leroymerlin.fr",
+}
 
 # Nb de magasins supposés « vus » par seed. L'endpoint stock LM en renvoie ~11 ;
 # on prend une marge (8) pour rester couvrant si un magasin ouvre à côté.
@@ -62,8 +75,57 @@ def geocode_cp(cp: str) -> tuple[float, float] | None:
     return float(lat), float(lon)
 
 
+def _fetch_lm_stores() -> list[dict]:
+    """Récupère les magasins LM officiels depuis le store-locator Woosmap."""
+    features: list[dict] = []
+    page = 1
+    while True:
+        url = WOOSMAP_URL.format(key=WOOSMAP_KEY, page=page)
+        req = urllib.request.Request(url, headers=WOOSMAP_HEADERS)
+        with urllib.request.urlopen(req, timeout=25) as resp:
+            data = json.load(resp)
+        features.extend(data.get("features", []))
+        pagination = data.get("pagination", {})
+        if page >= pagination.get("pageCount", 1):
+            break
+        page += 1
+
+    stores: list[dict] = []
+    for feature in features:
+        props = feature.get("properties", {})
+        geometry = feature.get("geometry", {})
+        coords = geometry.get("coordinates") or []
+        if len(coords) != 2:
+            continue
+        web = (props.get("contact") or {}).get("website", "") or ""
+        match = re.search(r"/magasins/([^./]+)\.html", web)
+        if not match:
+            continue
+        lon, lat = coords
+        city = (props.get("address") or {}).get("city", "") or ""
+        stores.append({
+            "store_id": props.get("store_id"),
+            "name": props.get("name", ""),
+            "slug": match.group(1),
+            "city": city.title() if city.isupper() else city,
+            "cp": (props.get("address") or {}).get("zipcode", "") or "",
+            "lat": round(float(lat), 6),
+            "lon": round(float(lon), 6),
+        })
+    if not stores:
+        raise RuntimeError("liste des magasins Leroy Merlin vide")
+    return stores
+
+
 def _load_stores() -> list[dict]:
     """Magasins uniques (dédup par coordonnée arrondie)."""
+    if not _STORES_PATH.exists():
+        stores = _fetch_lm_stores()
+        _STORES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _STORES_PATH.write_text(
+            json.dumps(stores, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     raw = json.loads(_STORES_PATH.read_text(encoding="utf-8"))
     uniq: dict = {}
     for s in raw:
