@@ -506,13 +506,14 @@ class Dashboard:
                 t.append(f"  ({secs}s)", style="dim")
             return t
         idx = s.get("index", 0)
+        current_idx = s.get("current_index", idx)
         total = s.get("total", 0)
         label = s.get("label", "")
         action = s.get("action", "")
         t = Text()
         t.append(f"  {action} " if action else "  Scan ")
         if total:
-            t.append(f"{idx}/{total}", style="bold cyan")
+            t.append(f"{current_idx}/{total}", style="bold cyan")
             t.append(f"  {label}", style="dim")
         # Chrono du seed en cours.
         ss = s.get("seed_started_at")
@@ -541,6 +542,7 @@ def make_handler(state: dict, scanner: ScannerBase):
         if event_type == "scan_start":
             state["total"] = payload.get("total_seeds", 0)
             state["index"] = 0
+            state["current_index"] = 0
             state["zone"] = payload.get("zone", state.get("zone", ""))
             state["phase"] = "scanning"
             state["action"] = "Scan"
@@ -560,7 +562,8 @@ def make_handler(state: dict, scanner: ScannerBase):
             state["pause_until"] = None
         elif event_type == "seed_start":
             state["phase"] = "scanning"
-            state["index"] = payload.get("index", state.get("index", 0))
+            state["current_index"] = payload.get(
+                "index", state.get("current_index", state.get("index", 0)))
             state["total"] = payload.get("total", state.get("total", 0))
             state["label"] = payload.get("label", "")
             state["action"] = "Point"
@@ -569,6 +572,7 @@ def make_handler(state: dict, scanner: ScannerBase):
         elif event_type == "seed_done":
             state["phase"] = "scanning"
             state["index"] = payload.get("index", state.get("index", 0))
+            state["current_index"] = state["index"]
             state["total"] = payload.get("total", state.get("total", 0))
             state["label"] = payload.get("label", "")
             state["seed_started_at"] = None  # seed fini, chrono figé
@@ -584,6 +588,9 @@ def make_handler(state: dict, scanner: ScannerBase):
                 1 for s in state["stores"].values() if s.get("restock"))
         elif event_type == "seed_blocked":
             state["blocked"] = state.get("blocked", 0) + 1
+            state["index"] = payload.get("index", state.get("index", 0))
+            state["current_index"] = state["index"]
+            state["total"] = payload.get("total", state.get("total", 0))
             state["label"] = payload.get("label", "")
             state["seed_started_at"] = None
         elif event_type == "pause":
@@ -662,6 +669,7 @@ def _run_with_live(scanner: ScannerBase, ns: argparse.Namespace,
     state["action"] = "Ouverture session"
     state["label"] = ""
     state["index"] = 0
+    state["current_index"] = 0
     state["total"] = 0
     state["_counter"] = 0
     state["scan_started_at"] = None
@@ -780,7 +788,7 @@ def main() -> int:
     state: dict = {
         "phase": "idle", "retailer": ", ".join(s.RETAILER_NAME for s in scanners),
         "zone": overrides.get("zone", ""), "product_ref": "",
-        "index": 0, "total": 0, "label": "", "action": "",
+        "index": 0, "current_index": 0, "total": 0, "label": "", "action": "",
         "stores": {}, "in_stock": 0, "blocked": 0, "completed": True,
         "online": None, "cycle": 1, "next_at": None,
         "scan_started_at": None, "seed_started_at": None,
