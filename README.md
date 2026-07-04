@@ -89,8 +89,9 @@ Pour tout arrêter : appuie sur **Ctrl + C**.
 
 ## ❓ Petits soucis fréquents
 
-- **« pip / python n'est pas reconnu »** → ajoute un `3` : `pip3`, `python3`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » (étape 2), puis **ferme et rouvre** le terminal.
-- **Ça plante au premier lancement** → refais l'étape 4, elle installe tout ce qu'il faut.
+- **« python n'est pas reconnu »** → essaie `python3 install.py` puis `python3 run.py`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » sur Windows, puis **ferme et rouvre** le terminal.
+- **Ça plante au premier lancement** → refais l'étape 4 avec `python install.py` ou `python3 install.py`, elle installe tout ce qu'il faut.
+- **Après une mise à jour du dossier, ça replante** → relance simplement `python install.py` ou `python3 install.py`, puis relance avec `python run.py` ou `python3 run.py`.
 - **Tu ne retrouves pas le dossier dans le terminal** → recommence l'étape 3 (le glisser-déposer sur Mac, ou le `cmd` dans la barre d'adresse sur Windows).
 
 C'est tout. Prends soin de toi et reste au frais. ❄️
