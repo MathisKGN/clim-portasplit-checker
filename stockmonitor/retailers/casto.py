@@ -33,7 +33,6 @@ from ..common import (
     aggregate,
     ean_from_url,
     http_get,
-    ts,
 )
 from ..seeds_casto_france import SEEDS_CASTO_FRANCE
 

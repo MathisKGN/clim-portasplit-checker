@@ -24,6 +24,7 @@ import random
 import sys
 import time
 from contextlib import contextmanager
+from importlib.util import find_spec
 from pathlib import Path
 
 STOCK_URL = (
@@ -41,9 +42,7 @@ XHR_ACCEPT = "application/json, text/plain, */*"
 
 def _require_runtime() -> None:
     """Vérifie curl_cffi, sinon message clair."""
-    try:
-        from curl_cffi import requests as creq  # noqa: F401
-    except ImportError:
+    if find_spec("curl_cffi") is None:
         sys.exit(
             "curl_cffi requis pour le mode HTTP.\n"
             "Installe : pip install curl_cffi\n"

@@ -26,7 +26,6 @@ from ..common import (
     aggregate,
     normalize_text,
     order_core_first,
-    ts,
 )
 
 try:
@@ -332,4 +331,3 @@ class LmScanner(ScannerBase):
         return {"stores": all_stores, "blocked": blocked, "seeds": total,
                 "completed": blocked == 0,
                 "extra": {"zone": zone, "engine": "http"}}
-

@@ -86,125 +86,94 @@ def test_parser_basic():
 
 
 # --------------------------------------------------------------------------- #
-# 2. Mode lent (--slow) : un challenge HTTP 200 déclenche un retry (sans warmup)
+# Helpers scanner HTTP offline
 # --------------------------------------------------------------------------- #
-def test_sequential_recovers_http_200_challenge():
+class FakeLmSession:
+    def __init__(self, responses):
+        self.responses = iter(responses)
+        self.fetch_calls = 0
+        self.remints = 0
+
+    def mint(self, lat, lon):
+        return next(self.responses)
+
+    def fetch_stock(self, lat, lon):
+        self.fetch_calls += 1
+        return next(self.responses)
+
+    def remint(self):
+        self.remints += 1
+
+    def _is_cookie_dead(self, status: int, body: str) -> bool:
+        return status == 403 or (status == 200 and ("datadome" in body.lower() or "captcha" in body.lower()))
+
+
+def _scan_args(seeds):
+    return SimpleNamespace(
+        product_ref="93857579",
+        product_url=lmmod.DEFAULT_PRODUCT_URL,
+        zone="idf",
+        custom_seeds=seeds,
+        zone_label="test",
+        max_seeds=0,
+        max_blocks=6,
+        min_delay=0,
+        max_delay=0,
+        stable_rounds=0,
+        wide=False,
+    )
+
+
+def test_http_scan_uses_mint_body_then_fetches_remaining_seeds():
     scanner = LmScanner()
-    original_seeds = lmmod.SEEDS_IDF
-    original_fetch_seed = lmmod._fetch_seed
-    original_sleep = lmmod.sleep_between
-    original_new_page = scanner._new_page
-    sleeps: list[bool] = []
-    responses = iter([
+    scanner._pause = lambda args, long=False: None
+    sess = FakeLmSession([(200, SAMPLE), (200, SAMPLE)])
+    args = _scan_args([("A", 48.0, 2.0), ("B", 49.0, 3.0)])
+
+    result = scanner.scan(sess, args)
+
+    assert sess.fetch_calls == 1, f"attendu 1 fetch après le mint, obtenu {sess.fetch_calls}"
+    assert sess.remints == 0
+    assert result["completed"] is True
+    assert result["blocked"] == 0
+    assert result["extra"]["engine"] == "http"
+    assert len(result["stores"]) == 4
+    print("  ✓ scan HTTP : body du mint réutilisé, seeds suivants fetchés")
+
+
+def test_http_scan_remints_once_after_mint_challenge():
+    scanner = LmScanner()
+    scanner._pause = lambda args, long=False: None
+    sess = FakeLmSession([
         (200, "<html><title>DataDome</title>captcha</html>"),
         (200, SAMPLE),
     ])
-    try:
-        lmmod.SEEDS_IDF = [("Seed test", 48.0, 2.0)]
-        scanner._new_page = lambda ctx, args: object()  # pas de vrai navigateur
-        lmmod._fetch_seed = lambda page, lat, lon, ref: next(responses)
-        lmmod.sleep_between = lambda args, long=False: sleeps.append(long)
-        args = SimpleNamespace(
-            product_ref="93857579", zone="idf", max_seeds=0, max_blocks=6,
-            min_delay=0, max_delay=0, slow=True,
-            tries_per_seed=3, stable_rounds=0, wide=False,
-        )
-        result = scanner.scan(object(), args)
-    finally:
-        lmmod.SEEDS_IDF = original_seeds
-        scanner._new_page = original_new_page
-        lmmod._fetch_seed = original_fetch_seed
-        lmmod.sleep_between = original_sleep
+    args = _scan_args([("A", 48.0, 2.0)])
 
-    # 1 backoff (long=True) entre le 1er échec et le retry réussi.
-    assert sleeps == [True], f"attendu 1 sleep long, obtenu {sleeps}"
+    result = scanner.scan(sess, args)
+
+    assert sess.remints == 1, f"attendu 1 remint, obtenu {sess.remints}"
+    assert sess.fetch_calls == 1
     assert result["completed"] is True
     assert result["blocked"] == 0
     assert len(result["stores"]) == 4
-    print("  ✓ mode lent : 1 challenge HTTP 200 -> 1 retry, 4 magasins")
+    print("  ✓ scan HTTP : challenge au mint -> remint unique puis succès")
 
 
-# --------------------------------------------------------------------------- #
-# 3. Mode rafale (défaut) : retry des points bloqués après backoff
-# --------------------------------------------------------------------------- #
-def test_batch_retries_blocked_points():
+def test_http_scan_stops_on_max_blocks():
     scanner = LmScanner()
-    original_seeds = lmmod.SEEDS_IDF
-    original_batch = lmmod._batch_fetch
-    original_sleep = lmmod.sleep_between
-    original_new_page = scanner._new_page
-    sleeps: list[bool] = []
-    batches = iter([
-        [(200, SAMPLE), (200, "<html>captcha datadome</html>")],
-        [(200, SAMPLE)],
-    ])
-    try:
-        lmmod.SEEDS_IDF = [("A", 48.0, 2.0), ("B", 49.0, 3.0)]
-        scanner._new_page = lambda ctx, args: object()
-        lmmod._batch_fetch = lambda page, coords, ref, batch_size=8: next(batches)
-        lmmod.sleep_between = lambda args, long=False: sleeps.append(long)
-        args = SimpleNamespace(
-            product_ref="93857579", zone="idf", max_seeds=0, slow=False,
-            batch_size=8, tries_per_seed=3, min_delay=0, max_delay=0,
-            max_blocks=6, wide=False, stable_rounds=0,
-        )
-        result = scanner.scan(object(), args)
-    finally:
-        lmmod.SEEDS_IDF = original_seeds
-        scanner._new_page = original_new_page
-        lmmod._batch_fetch = original_batch
-        lmmod.sleep_between = original_sleep
+    scanner._pause = lambda args, long=False: None
+    sess = FakeLmSession([(200, SAMPLE), (503, "<html>service unavailable</html>"), (200, SAMPLE)])
+    args = _scan_args([("A", 48.0, 2.0), ("B", 49.0, 3.0), ("C", 50.0, 4.0)])
+    args.max_blocks = 1
 
-    # 1 backoff (long=True) avant le retry du point bloqué.
-    assert sleeps == [True], f"attendu 1 sleep long, obtenu {sleeps}"
-    assert result["completed"] is True
-    assert result["blocked"] == 0
-    assert len(result["stores"]) == 4
-    print("  ✓ mode rafale : retry du point bloqué après backoff, 4 magasins")
+    result = scanner.scan(sess, args)
 
-
-# --------------------------------------------------------------------------- #
-# 4. --tries-per-seed honoré en rafale : break tôt si aucun progrès
-# --------------------------------------------------------------------------- #
-def test_batch_honors_tries_per_seed():
-    scanner = LmScanner()
-    original_seeds = lmmod.SEEDS_IDF
-    original_batch = lmmod._batch_fetch
-    original_sleep = lmmod.sleep_between
-    original_new_page = scanner._new_page
-    blocked_body = "<html>geo.captcha-delivery.com</html>"
-    batches = iter([
-        [(200, SAMPLE), (200, blocked_body)],
-        [(200, blocked_body)],
-    ])
-    n_calls = {"v": 0}
-
-    def fake_batch(page, coords, ref, batch_size=8):
-        n_calls["v"] += 1
-        return next(batches)
-
-    try:
-        lmmod.SEEDS_IDF = [("A", 48.0, 2.0), ("B", 49.0, 3.0)]
-        scanner._new_page = lambda ctx, args: object()
-        lmmod._batch_fetch = fake_batch
-        lmmod.sleep_between = lambda args, long=False: None
-        args = SimpleNamespace(
-            product_ref="93857579", zone="idf", max_seeds=0, slow=False,
-            batch_size=8, tries_per_seed=2, min_delay=0, max_delay=0,
-            max_blocks=6, wide=False, stable_rounds=0,
-        )
-        result = scanner.scan(object(), args)
-    finally:
-        lmmod.SEEDS_IDF = original_seeds
-        scanner._new_page = original_new_page
-        lmmod._batch_fetch = original_batch
-        lmmod.sleep_between = original_sleep
-
-    assert n_calls["v"] == 2, f"attendu 2 appels batch_fetch, obtenu {n_calls['v']}"
+    assert sess.fetch_calls == 1, f"le scan aurait dû s'arrêter après 1 blocage, obtenu {sess.fetch_calls}"
     assert result["blocked"] == 1
     assert result["completed"] is False
     assert len(result["stores"]) == 4
-    print("  ✓ --tries-per-seed : break tôt sans progrès, 1 point reste bloqué")
+    print("  ✓ scan HTTP : arrêt au seuil max_blocks")
 
 
 # --------------------------------------------------------------------------- #
@@ -242,8 +211,8 @@ def test_partial_scan_keeps_previous_alert_state():
 if __name__ == "__main__":
     print("Tests du parseur Leroy Merlin :")
     test_parser_basic()
-    test_sequential_recovers_http_200_challenge()
-    test_batch_retries_blocked_points()
-    test_batch_honors_tries_per_seed()
+    test_http_scan_uses_mint_body_then_fetches_remaining_seeds()
+    test_http_scan_remints_once_after_mint_challenge()
+    test_http_scan_stops_on_max_blocks()
     test_partial_scan_keeps_previous_alert_state()
     print("\n✅ Tous les tests passent.")

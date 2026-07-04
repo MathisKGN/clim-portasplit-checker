@@ -455,19 +455,6 @@ class ScannerBase(ABC):
                 except Exception:
                     pass
 
-    def _loop_one_cycle(self, args, ctx):
-        # Conservé pour compat éventuelle ; _run_loop gère désormais le cycle.
-        try:
-            if ctx is None:
-                self.run_once(args)
-            else:
-                self.run_cycle(ctx, args)
-        except KeyboardInterrupt:
-            raise
-        except Exception as e:
-            print(f"[{ts()}] Erreur de cycle : {e!r}")
-
-
 def _json(obj) -> str:
     import json
     return json.dumps(obj, ensure_ascii=False)

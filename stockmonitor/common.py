@@ -9,7 +9,6 @@ import csv
 import datetime as dt
 import json
 import math
-import random
 import re
 import time
 import unicodedata
@@ -22,16 +21,6 @@ from pathlib import Path
 def ts() -> str:
     """Horodatage local compact."""
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def sleep_between(args, long: bool = False):
-    """Pause aléatoire entre deux points de scan.
-
-    long=True  : backoff (max_delay × 2) sur blocage / retry.
-    long=False : délai normal (min_delay..max_delay).
-    """
-    lo, hi = (args.max_delay, args.max_delay * 2) if long else (args.min_delay, args.max_delay)
-    time.sleep(random.uniform(lo, hi))
 
 
 # --------------------------------------------------------------------------- #

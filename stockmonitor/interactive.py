@@ -23,6 +23,7 @@ import re
 import stat
 import sys
 import time
+from importlib.util import find_spec
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -37,13 +38,9 @@ from .retailers import REGISTRY
 # --------------------------------------------------------------------------- #
 def _require_pkgs() -> None:
     missing = []
-    try:
-        import rich  # noqa: F401
-    except ImportError:
+    if find_spec("rich") is None:
         missing.append("rich")
-    try:
-        import questionary  # noqa: F401
-    except ImportError:
+    if find_spec("questionary") is None:
         missing.append("questionary")
     if missing:
         sys.exit(
@@ -384,7 +381,6 @@ class Dashboard:
         from rich.table import Table
         from rich.text import Text
         from rich.spinner import Spinner
-        from rich.columns import Columns
 
         s = self.state
         phase = s.get("phase", "idle")
@@ -492,9 +488,9 @@ class Dashboard:
         body = Group(title, Text(""), status_line, prog, Text(""),
                      table, Text(""), summary)
         return Panel(body, border_style="cyan", padding=(1, 2),
-                     title=f"[bold cyan]stockmonitor[/]")
+                     title="[bold cyan]stockmonitor[/]")
 
-    def _status_text(self, s) -> "Text":
+    def _status_text(self, s):
         from rich.text import Text
         now = dt.datetime.now()
         phase = s.get("phase", "idle")
@@ -730,7 +726,6 @@ def main() -> int:
     from rich.console import Console
     from rich.panel import Panel
     from rich.text import Text
-    import questionary
 
     console = Console()
     console.print(Panel(
