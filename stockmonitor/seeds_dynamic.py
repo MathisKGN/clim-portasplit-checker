@@ -42,6 +42,28 @@ WOOSMAP_HEADERS = {
 DEFAULT_MARGIN = 8
 
 
+def _ssl_context() -> ssl.SSLContext | None:
+    """Contexte SSL basé sur le bundle certifi si disponible.
+
+    Le Python de python.org sur macOS ne valide pas les certificats tant que
+    « Install Certificates.command » n'a pas été lancé : `urllib` échoue alors
+    avec CERTIFICATE_VERIFY_FAILED sur tout appel HTTPS. certifi est déjà
+    présent (dépendance de requests) ; on s'appuie dessus pour que ça marche
+    sans intervention. En cas d'absence, on retombe sur le contexte par défaut.
+    """
+    try:
+        import certifi
+    except ImportError:
+        return None
+    try:
+        return ssl.create_default_context(cafile=certifi.where())
+    except (OSError, ssl.SSLError):
+        return None
+
+
+_SSL_CONTEXT = _ssl_context()
+
+
 class GeocodeError(RuntimeError):
     """Erreur utilisateur pendant la conversion code postal -> coordonnées."""
 
@@ -90,7 +112,7 @@ def _has_certificate_error(exc: BaseException) -> bool:
 def _request_json(url: str, service: str):
     req = urllib.request.Request(url, headers={"User-Agent": "stockmonitor/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
         reason = f" {e.reason}" if e.reason else ""
@@ -242,7 +264,7 @@ def _fetch_lm_stores() -> list[dict]:
     while True:
         url = WOOSMAP_URL.format(key=WOOSMAP_KEY, page=page)
         req = urllib.request.Request(url, headers=WOOSMAP_HEADERS)
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        with urllib.request.urlopen(req, timeout=25, context=_SSL_CONTEXT) as resp:
             data = json.load(resp)
         features.extend(data.get("features", []))
         pagination = data.get("pagination", {})

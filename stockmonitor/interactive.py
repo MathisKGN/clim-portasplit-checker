@@ -316,8 +316,9 @@ def _send_telegram_test(token: str, chat_id: str) -> tuple[bool, str]:
         data=data,
         method="POST",
     )
+    from .seeds_dynamic import _SSL_CONTEXT
     try:
-        with urlopen(req, timeout=15) as resp:
+        with urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         return False, str(e)

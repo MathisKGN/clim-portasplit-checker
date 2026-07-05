@@ -27,7 +27,7 @@ def _url_of(req) -> str:
 
 
 def test_geocode_cp_or_raise_reads_primary_geo_api(monkeypatch):
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         assert "geo.api.gouv.fr" in _url_of(req)
         return _response([
             {
@@ -43,7 +43,7 @@ def test_geocode_cp_or_raise_reads_primary_geo_api(monkeypatch):
 
 
 def test_geocode_cp_or_raise_uses_adresse_api_fallback(monkeypatch):
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         url = _url_of(req)
         if "geo.api.gouv.fr" in url:
             raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, None)
@@ -63,7 +63,7 @@ def test_geocode_cp_or_raise_uses_adresse_api_fallback(monkeypatch):
 
 
 def test_geocode_cp_or_raise_reports_unknown_postcode(monkeypatch):
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         if "geo.api.gouv.fr" in _url_of(req):
             return _response([])
         return _response({"features": []})
@@ -77,7 +77,7 @@ def test_geocode_cp_or_raise_reports_unknown_postcode(monkeypatch):
 def test_geocode_cp_or_raise_reports_ssl_error(monkeypatch):
     cert_error = ssl.SSLCertVerificationError("certificate verify failed")
 
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         raise urllib.error.URLError(cert_error)
 
     monkeypatch.setattr(seeds_dynamic.urllib.request, "urlopen", fake_urlopen)
@@ -91,7 +91,7 @@ def test_geocode_cp_or_raise_reports_ssl_error(monkeypatch):
 
 
 def test_geocode_cp_keeps_none_compatibility(monkeypatch):
-    def fake_urlopen(req, timeout):
+    def fake_urlopen(req, timeout, context=None):
         raise urllib.error.URLError("offline")
 
     monkeypatch.setattr(seeds_dynamic.urllib.request, "urlopen", fake_urlopen)
