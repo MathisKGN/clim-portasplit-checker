@@ -26,7 +26,7 @@ import time
 from importlib.util import find_spec
 from pathlib import Path
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request
 
 from .base import ScannerBase
 from .common import short_loop_warning
@@ -316,9 +316,9 @@ def _send_telegram_test(token: str, chat_id: str) -> tuple[bool, str]:
         data=data,
         method="POST",
     )
-    from .seeds_dynamic import _SSL_CONTEXT
+    from .seeds_dynamic import _urlopen_with_ssl_fallback
     try:
-        with urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
+        with _urlopen_with_ssl_fallback(req, timeout=15) as resp:
             payload = json.loads(resp.read().decode("utf-8"))
     except Exception as e:
         return False, str(e)

@@ -90,6 +90,30 @@ def test_geocode_cp_or_raise_reports_ssl_error(monkeypatch):
         assert "Install Certificates.command" in (exc_info.value.hint or "")
 
 
+def test_geocode_cp_or_raise_retries_certifi_after_default_ssl_error(monkeypatch):
+    cert_error = ssl.SSLCertVerificationError("certificate verify failed")
+    fallback_context = object()
+    contexts = []
+
+    def fake_urlopen(req, timeout, context=None):
+        contexts.append(context)
+        if len(contexts) == 1:
+            raise urllib.error.URLError(cert_error)
+        return _response([
+            {
+                "nom": "Créteil",
+                "centre": {"coordinates": [2.4523, 48.7845]},
+                "population": 93397,
+            }
+        ])
+
+    monkeypatch.setattr(seeds_dynamic, "_SSL_CONTEXT", fallback_context)
+    monkeypatch.setattr(seeds_dynamic.urllib.request, "urlopen", fake_urlopen)
+
+    assert seeds_dynamic.geocode_cp_or_raise("94000") == (48.7845, 2.4523)
+    assert contexts == [None, fallback_context]
+
+
 def test_geocode_cp_keeps_none_compatibility(monkeypatch):
     def fake_urlopen(req, timeout, context=None):
         raise urllib.error.URLError("offline")

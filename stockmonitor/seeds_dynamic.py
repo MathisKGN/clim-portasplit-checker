@@ -43,13 +43,14 @@ DEFAULT_MARGIN = 8
 
 
 def _ssl_context() -> ssl.SSLContext | None:
-    """Contexte SSL basé sur le bundle certifi si disponible.
+    """Contexte SSL de secours basé sur le bundle certifi si disponible.
 
     Le Python de python.org sur macOS ne valide pas les certificats tant que
     « Install Certificates.command » n'a pas été lancé : `urllib` échoue alors
     avec CERTIFICATE_VERIFY_FAILED sur tout appel HTTPS. certifi est déjà
-    présent (dépendance de requests) ; on s'appuie dessus pour que ça marche
-    sans intervention. En cas d'absence, on retombe sur le contexte par défaut.
+    présent (dépendance de requests) ; on s'appuie dessus en secours pour que
+    ça marche sans intervention. En cas d'absence, on garde le comportement par
+    défaut de `urllib`.
     """
     try:
         import certifi
@@ -99,7 +100,7 @@ def _mac_certificate_hint() -> str | None:
     )
 
 
-def _has_certificate_error(exc: BaseException) -> bool:
+def _has_certificate_error(exc: object) -> bool:
     if isinstance(exc, ssl.SSLCertVerificationError):
         return True
     text = str(exc)
@@ -109,10 +110,23 @@ def _has_certificate_error(exc: BaseException) -> bool:
     )
 
 
+def _urlopen_with_ssl_fallback(req: urllib.request.Request, *, timeout: int):
+    """Ouvre avec les CAs système, puis certifi seulement sur erreur SSL."""
+    try:
+        return urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", e)
+        if _SSL_CONTEXT is not None and (
+            _has_certificate_error(e) or _has_certificate_error(reason)
+        ):
+            return urllib.request.urlopen(req, timeout=timeout, context=_SSL_CONTEXT)
+        raise
+
+
 def _request_json(url: str, service: str):
     req = urllib.request.Request(url, headers={"User-Agent": "stockmonitor/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=10, context=_SSL_CONTEXT) as resp:
+        with _urlopen_with_ssl_fallback(req, timeout=10) as resp:
             return json.load(resp)
     except urllib.error.HTTPError as e:
         reason = f" {e.reason}" if e.reason else ""
@@ -264,7 +278,7 @@ def _fetch_lm_stores() -> list[dict]:
     while True:
         url = WOOSMAP_URL.format(key=WOOSMAP_KEY, page=page)
         req = urllib.request.Request(url, headers=WOOSMAP_HEADERS)
-        with urllib.request.urlopen(req, timeout=25, context=_SSL_CONTEXT) as resp:
+        with _urlopen_with_ssl_fallback(req, timeout=25) as resp:
             data = json.load(resp)
         features.extend(data.get("features", []))
         pagination = data.get("pagination", {})
