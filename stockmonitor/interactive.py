@@ -69,22 +69,51 @@ def _prefs_path(data_dir: str | Path) -> Path:
     return Path(data_dir) / "interactive_prefs.json"
 
 
-def _load_last_postcode(data_dir: str | Path) -> str | None:
+def _load_last_area(data_dir: str | Path) -> tuple[str | None, tuple[float, float] | None]:
     path = _prefs_path(data_dir)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return None
+        return None, None
+
     cp = str(data.get("postcode", "")).strip()
-    if cp.isdigit() and len(cp) == 5:
-        return cp
+    if not (cp.isdigit() and len(cp) == 5):
+        cp = None
+
+    center = data.get("center")
+    if isinstance(center, list) and len(center) == 2:
+        try:
+            lat, lon = float(center[0]), float(center[1])
+        except (TypeError, ValueError):
+            center = None
+        else:
+            if -90 <= lat <= 90 and -180 <= lon <= 180:
+                return cp, (lat, lon)
+    return cp, None
+
+
+def _load_last_postcode(data_dir: str | Path) -> str | None:
+    cp, _ = _load_last_area(data_dir)
+    return cp
+
+
+def _load_cached_center(data_dir: str | Path, postcode: str) -> tuple[float, float] | None:
+    cp, center = _load_last_area(data_dir)
+    if cp == postcode:
+        return center
     return None
 
 
-def _save_last_postcode(data_dir: str | Path, postcode: str) -> None:
+def _save_last_postcode(
+    data_dir: str | Path,
+    postcode: str,
+    center: tuple[float, float] | None = None,
+) -> None:
     path = _prefs_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"postcode": postcode.strip()}
+    if center is not None:
+        data["center"] = [round(center[0], 6), round(center[1], 6)]
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
@@ -96,7 +125,12 @@ def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
     """
     import questionary
     from rich.console import Console
-    from .seeds_dynamic import geocode_cp, compute_seeds
+    from .seeds_dynamic import (
+        GeocodeError,
+        PostcodeNotFound,
+        compute_seeds,
+        geocode_cp_or_raise,
+    )
 
     console = Console()
     default_cp = _load_last_postcode(data_dir) or ""
@@ -123,13 +157,29 @@ def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
         radius_km = int(radius.strip())
 
         console.print(f"  [dim]Géolocalisation du {cp}…[/]")
-        center = geocode_cp(cp)
-        if center is None:
-            console.print("  [red]Code postal introuvable (ou pas de réseau).[/] "
-                          "Réessaie.")
+        try:
+            center = geocode_cp_or_raise(cp)
+        except PostcodeNotFound as e:
+            console.print(f"  [red]{e}[/] Réessaie.")
             default_cp = cp
             continue
-        _save_last_postcode(data_dir, cp)
+        except GeocodeError as e:
+            cached_center = _load_cached_center(data_dir, cp)
+            if cached_center is None:
+                console.print(f"  [red]Impossible de géolocaliser {cp}.[/] {e}")
+                if e.hint:
+                    console.print(f"  [yellow]{e.hint}[/]")
+                console.print("  Réessaie après avoir corrigé le problème réseau/SSL.")
+                default_cp = cp
+                continue
+            console.print(f"  [yellow]Géolocalisation en ligne indisponible:[/] {e}")
+            if e.hint:
+                console.print(f"  [yellow]{e.hint}[/]")
+            console.print(
+                f"  [yellow]J'utilise les coordonnées sauvegardées pour {cp}.[/]"
+            )
+            center = cached_center
+        _save_last_postcode(data_dir, cp, center)
         default_cp = cp
 
         console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
