@@ -14,13 +14,14 @@ loop = 60
 
 [casto]
 postcode = "75011"
+radius_km = 15
 """,
         encoding="utf-8",
     )
 
     assert load_config(config_path) == {
         "common": {"loop": 60},
-        "casto": {"postcode": "75011"},
+        "casto": {"postcode": "75011", "radius_km": 15},
     }
 
 
@@ -44,6 +45,7 @@ def test_merge_config_into_args_preserves_cli_values_and_merges_common_then_reta
         "casto": {
             "notify_cmd": "casto-notify",
             "postcode": "75011",
+            "radius_km": 15,
         },
     }
 
@@ -53,4 +55,5 @@ def test_merge_config_into_args_preserves_cli_values_and_merges_common_then_reta
     assert args.data_dir == "data"
     assert args.notify_cmd == "casto-notify"
     assert args.postcode == "75011"
+    assert args.radius_km == 15
     assert not hasattr(args, "ignored_none")

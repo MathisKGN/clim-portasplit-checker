@@ -15,6 +15,8 @@ Mécanique :
      L'API n'a pas de plafond de distance : un seul point ramène jusqu'à N
      magasins. On sème 3 coords France (greedy set-cover, cf. seeds_casto_france)
      pour couvrir les ~90 magasins Casto FR en 3 appels, puis on déduplique.
+     Si l'utilisateur configure un rayon local, on filtre ensuite les magasins
+     par distance réelle depuis son code postal.
   3. Disponibilité en ligne (livraison à domicile) — BFF same-origin, sans token :
         GET https://www.castorama.fr/casto-browse-mfe/api/fulfilment-options
             ?compositeOfferId=<ean>&delivery=true&postalCode=<cp>
@@ -35,6 +37,7 @@ from ..common import (
     http_get,
 )
 from ..seeds_casto_france import SEEDS_CASTO_FRANCE
+from ..seeds_dynamic import geocode_cp_or_raise, haversine_km
 
 # --------------------------------------------------------------------------- #
 # Constantes
@@ -55,6 +58,74 @@ STOCK_NOT_CARRIED = {"notstockedinstore", "notranged", "notsold"}
 CC_AVAILABLE = {"allavailable", "someavailable", "available"}
 
 TOKEN_TTL_S = 6 * 3600
+
+
+def _format_km(value: float) -> str:
+    return f"{int(value)}" if float(value).is_integer() else f"{value:g}"
+
+
+def _parse_distance_km(raw: str) -> float | None:
+    m = re.search(r"([\d.,]+)", raw or "")
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _normalize_center(center) -> tuple[float, float]:
+    if not isinstance(center, (list, tuple)) or len(center) != 2:
+        raise ValueError("area_center doit contenir deux coordonnées: (lat, lon).")
+    try:
+        lat, lon = float(center[0]), float(center[1])
+    except (TypeError, ValueError) as e:
+        raise ValueError("area_center contient des coordonnées non numériques.") from e
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("area_center contient des coordonnées hors limites.")
+    return lat, lon
+
+
+def _resolve_local_radius(args) -> tuple[tuple[float, float], float, str] | None:
+    radius = getattr(args, "radius_km", 0) or 0
+    try:
+        radius = float(radius)
+    except (TypeError, ValueError) as e:
+        raise ValueError("radius_km doit être un nombre.") from e
+    if radius < 0:
+        raise ValueError("radius_km doit être supérieur ou égal à 0.")
+    if radius == 0:
+        return None
+
+    center = getattr(args, "area_center", None)
+    if center is not None:
+        center = _normalize_center(center)
+    else:
+        center = geocode_cp_or_raise(str(getattr(args, "postcode", "")).strip())
+
+    zone = getattr(args, "zone_label", None)
+    if not zone:
+        zone = f"{getattr(args, 'postcode', '')} · {_format_km(radius)} km"
+    return center, radius, zone
+
+
+def _filter_store_for_radius(
+    store: dict,
+    center: tuple[float, float],
+    radius_km: float,
+) -> dict | None:
+    lat, lon = store.get("lat"), store.get("lon")
+    if lat is None or lon is None:
+        return None
+    try:
+        distance = haversine_km(center[0], center[1], float(lat), float(lon))
+    except (TypeError, ValueError):
+        return None
+    if distance > radius_km:
+        return None
+    filtered = dict(store)
+    filtered["distance_km"] = round(distance, 2)
+    return filtered
 
 
 # --------------------------------------------------------------------------- #
@@ -167,12 +238,12 @@ def _parse_store(raw: dict) -> dict | None:
 
     postcode = geo.get("postalCode") or ""
     dist = store.get("distance") or ""
-    mdist = re.search(r"([\d.]+)", dist)
+    api_distance_km = _parse_distance_km(dist)
 
     state, restock = _classify(stock_level, quantity, cc_avail)
 
     lat, lon = coords.get("latitude"), coords.get("longitude")
-    if lat and lon:
+    if lat is not None and lon is not None:
         url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
     else:
         url = ("https://www.google.com/maps/search/?api=1&query="
@@ -183,7 +254,8 @@ def _parse_store(raw: dict) -> dict | None:
         name=store.get("name") or sid,
         postcode=postcode,
         dept=postcode[:2],
-        distance_km=float(mdist.group(1)) if mdist else None,
+        distance_km=api_distance_km,
+        api_distance_km=api_distance_km,
         lat=coords.get("latitude"),
         lon=coords.get("longitude"),
         stock_level=stock_level,
@@ -228,6 +300,7 @@ class CastoScanner(ScannerBase):
     def get_defaults(cls) -> dict:
         return {
             "postcode": "75011",
+            "radius_km": 0,
             "page_size": 50,
             "max_seeds": 0,
             "min_delay": 0.8,
@@ -262,7 +335,10 @@ class CastoScanner(ScannerBase):
     # --- CLI (minimal : juste l'override produit) ------------------------- #
     def add_arguments(self, parser):
         # --product-url déjà ajouté par les args communs.
-        pass
+        parser.add_argument("--postcode", default=None, metavar="CP",
+                            help="Code postal pour la livraison et le filtre local.")
+        parser.add_argument("--radius-km", type=float, default=None, metavar="KM",
+                            help="Rayon magasin autour du code postal. 0 = France entière.")
 
     def enrich_args(self, args):
         """Args n'a pas de --product-ref pour Casto (c'est un EAN déduit de l'URL).
@@ -285,6 +361,11 @@ class CastoScanner(ScannerBase):
     def scan(self, session, args) -> dict:
         args = self.enrich_args(args)
         ean = args.product_ref
+        local = _resolve_local_radius(args)
+        local_center = local[0] if local else None
+        local_radius = local[1] if local else None
+        zone = local[2] if local else "France"
+
         self._emit("warmup", phase="token", detail="fetch_token")
         token = _get_token(session, args)
         self._emit("warmup", phase="online", detail="fulfilment_check")
@@ -297,7 +378,7 @@ class CastoScanner(ScannerBase):
             seeds = seeds[: args.max_seeds]
         total = len(seeds)
 
-        self._emit("scan_start", total_seeds=total, zone="France",
+        self._emit("scan_start", total_seeds=total, zone=zone,
                    product_ref=ean, product_url=getattr(args, "product_url", None))
 
         all_stores: dict = {}
@@ -325,11 +406,20 @@ class CastoScanner(ScannerBase):
                 continue
 
             used += 1
-            found = {st["id"]: st for rs in raw if (st := _parse_store(rs))}
+            found: dict = {}
+            for rs in raw:
+                st = _parse_store(rs)
+                if not st:
+                    continue
+                if local_center is not None and local_radius is not None:
+                    st = _filter_store_for_radius(st, local_center, local_radius)
+                    if not st:
+                        continue
+                found[st["id"]] = st
             stores_added = list(found.values())
             new = aggregate(found, all_stores)
             self._emit("seed_done", index=i, total=total, label=label,
-                       found=len(raw), new=new, total_stores=len(all_stores),
+                       found=len(found), new=new, total_stores=len(all_stores),
                        stores_added=stores_added)
             stable = stable + 1 if new == 0 else 0
             if all_stores and stable >= args.stable_rounds:

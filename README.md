@@ -113,7 +113,7 @@ Le TUI est le lancement recommandé. Si tu veux automatiser ou lancer une enseig
 
 ```
 python run.py lm --loop 900
-python run.py casto --loop 900
+python run.py casto --postcode 59000 --radius-km 15 --loop 900
 python run.py all --loop 900
 ```
 
