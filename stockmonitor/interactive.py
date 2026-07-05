@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import queue
 import re
 import stat
 import sys
+import threading
 import time
 from importlib.util import find_spec
 from pathlib import Path
@@ -744,6 +746,40 @@ class _NullStdout:
     def flush(self): pass
 
 
+def _run_scanner_once_isolated(scanner: ScannerBase, ns: argparse.Namespace) -> dict:
+    """Execute le scanner dans un thread sans boucle asyncio active.
+
+    Certaines combinaisons Raspberry Pi OS Lite / Python / prompt_toolkit
+    gardent une boucle asyncio active dans le thread principal après les
+    prompts. Playwright sync refuse alors de démarrer, même si le scanner est
+    lui-même synchrone.
+    """
+    results: queue.Queue[tuple[bool, object]] = queue.Queue(maxsize=1)
+
+    def worker() -> None:
+        try:
+            results.put((True, scanner.run_once(ns)))
+        except BaseException as e:
+            results.put((False, e))
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"stockmonitor-{scanner.CONFIG_KEY or scanner.prefix}-scan",
+        daemon=True,
+    )
+    thread.start()
+    while thread.is_alive():
+        thread.join(0.1)
+
+    if results.empty():
+        raise RuntimeError("Le scan s'est terminé sans résultat.")
+
+    ok, payload = results.get()
+    if ok:
+        return payload
+    raise payload
+
+
 def _run_with_live(scanner: ScannerBase, ns: argparse.Namespace,
                    state: dict) -> dict:
     """Lance un cycle tout en rendant le dashboard Live.
@@ -786,7 +822,7 @@ def _run_with_live(scanner: ScannerBase, ns: argparse.Namespace,
         old_stdout = sys.stdout
         sys.stdout = _NullStdout()
         try:
-            result = scanner.run_once(ns)
+            result = _run_scanner_once_isolated(scanner, ns)
         finally:
             sys.stdout = old_stdout
 
