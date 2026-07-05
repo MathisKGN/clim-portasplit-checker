@@ -1,7 +1,7 @@
 """Seeds LM calculés à la volée depuis un code postal + un rayon.
 
 Le mode interactif demande un code postal et un rayon (5-700 km). On en dérive :
-  1. le centre (lat/lon) via géocodage du code postal (geo.api.gouv.fr, sans clé) ;
+  1. le centre (lat/lon) via géocodage du code postal (APIs publiques, sans clé) ;
   2. la liste des magasins LM à <= rayon du centre (data/lm_stores.json) ;
   3. le jeu minimal de seeds (set-cover greedy) couvrant ces magasins.
 
@@ -14,6 +14,10 @@ from __future__ import annotations
 import json
 import math
 import re
+import socket
+import ssl
+import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -38,6 +42,22 @@ WOOSMAP_HEADERS = {
 DEFAULT_MARGIN = 8
 
 
+class GeocodeError(RuntimeError):
+    """Erreur utilisateur pendant la conversion code postal -> coordonnées."""
+
+    def __init__(self, message: str, *, hint: str | None = None):
+        super().__init__(message)
+        self.hint = hint
+
+
+class PostcodeNotFound(GeocodeError):
+    """Le code postal est valide syntaxiquement, mais inconnu des APIs."""
+
+
+class GeocodeServiceError(GeocodeError):
+    """Erreur technique pendant l'appel aux APIs de géocodage."""
+
+
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -47,32 +67,172 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 2 * r * math.asin(math.sqrt(x))
 
 
-def geocode_cp(cp: str) -> tuple[float, float] | None:
-    """Code postal -> (lat, lon) du centre de la commune principale.
+def _mac_certificate_hint() -> str | None:
+    if sys.platform != "darwin":
+        return None
+    pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return (
+        "Sur Mac avec Python depuis python.org, lance cette commande puis "
+        f"réessaie : open \"/Applications/Python {pyver}/Install Certificates.command\""
+    )
 
-    Utilise l'API publique geo.api.gouv.fr (gratuite, sans clé). Renvoie None
-    si le code postal est inconnu ou si l'appel échoue (pas de réseau…).
-    """
+
+def _has_certificate_error(exc: BaseException) -> bool:
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return True
+    text = str(exc)
+    return (
+        "CERTIFICATE_VERIFY_FAILED" in text
+        or "certificate verify failed" in text.lower()
+    )
+
+
+def _request_json(url: str, service: str):
+    req = urllib.request.Request(url, headers={"User-Agent": "stockmonitor/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.load(resp)
+    except urllib.error.HTTPError as e:
+        reason = f" {e.reason}" if e.reason else ""
+        raise GeocodeServiceError(
+            f"{service} a répondu HTTP {e.code}{reason}."
+        ) from e
+    except urllib.error.URLError as e:
+        reason = e.reason
+        if _has_certificate_error(e) or _has_certificate_error(reason):
+            raise GeocodeServiceError(
+                f"Erreur SSL en appelant {service}: certificat HTTPS non validé.",
+                hint=_mac_certificate_hint(),
+            ) from e
+        if isinstance(reason, socket.gaierror):
+            detail = getattr(reason, "strerror", None) or str(reason)
+            raise GeocodeServiceError(
+                f"DNS impossible pour {service}: {detail}."
+            ) from e
+        if isinstance(reason, TimeoutError):
+            raise GeocodeServiceError(
+                f"Timeout en appelant {service} après 10 secondes."
+            ) from e
+        raise GeocodeServiceError(
+            f"Connexion impossible à {service}: {reason!r}."
+        ) from e
+    except TimeoutError as e:
+        raise GeocodeServiceError(
+            f"Timeout en appelant {service} après 10 secondes."
+        ) from e
+    except json.JSONDecodeError as e:
+        raise GeocodeServiceError(
+            f"{service} a répondu, mais pas avec du JSON valide."
+        ) from e
+
+
+def _coordinates_from_geo_api(cp: str) -> tuple[float, float]:
     cp = cp.strip()
     url = ("https://geo.api.gouv.fr/communes?"
            + urllib.parse.urlencode({"codePostal": cp,
                                      "fields": "nom,centre,population",
                                      "format": "json"}))
-    try:
-        with urllib.request.urlopen(url, timeout=10) as resp:
-            data = json.load(resp)
-    except Exception:
-        return None
+    data = _request_json(url, "geo.api.gouv.fr")
+    if not isinstance(data, list):
+        raise GeocodeServiceError(
+            "Réponse geo.api.gouv.fr inattendue: JSON racine non-liste."
+        )
     if not data:
-        return None
+        raise PostcodeNotFound(
+            f"Code postal {cp} introuvable dans geo.api.gouv.fr."
+        )
+    data = [item for item in data if isinstance(item, dict)]
+    if not data:
+        raise GeocodeServiceError(
+            "Réponse geo.api.gouv.fr inattendue: aucune commune exploitable."
+        )
     # Plusieurs communes peuvent partager un CP : on prend la plus peuplée
     # (centre le plus représentatif de la zone).
     data.sort(key=lambda c: c.get("population", 0) or 0, reverse=True)
     coords = data[0].get("centre", {}).get("coordinates")
     if not coords or len(coords) != 2:
+        raise GeocodeServiceError(
+            "Réponse geo.api.gouv.fr inattendue: champ centre.coordinates absent."
+        )
+    try:
+        lon, lat = coords  # GeoJSON = [lon, lat]
+        return float(lat), float(lon)
+    except (TypeError, ValueError) as e:
+        raise GeocodeServiceError(
+            "Réponse geo.api.gouv.fr inattendue: coordonnées non numériques."
+        ) from e
+
+
+def _coordinates_from_adresse_api(cp: str) -> tuple[float, float]:
+    url = ("https://api-adresse.data.gouv.fr/search/?"
+           + urllib.parse.urlencode({"q": cp,
+                                     "type": "municipality",
+                                     "limit": 5}))
+    data = _request_json(url, "api-adresse.data.gouv.fr")
+    features = data.get("features", []) if isinstance(data, dict) else []
+    for feature in features:
+        if not isinstance(feature, dict):
+            continue
+        props = feature.get("properties", {}) or {}
+        if props.get("postcode") != cp:
+            continue
+        coords = (feature.get("geometry", {}) or {}).get("coordinates")
+        if coords and len(coords) == 2:
+            try:
+                lon, lat = coords
+                return float(lat), float(lon)
+            except (TypeError, ValueError) as e:
+                raise GeocodeServiceError(
+                    "Réponse api-adresse.data.gouv.fr inattendue: "
+                    "coordonnées non numériques."
+                ) from e
+    raise PostcodeNotFound(
+        f"Code postal {cp} introuvable dans api-adresse.data.gouv.fr."
+    )
+
+
+def geocode_cp_or_raise(cp: str) -> tuple[float, float]:
+    """Code postal -> (lat, lon), avec une erreur exploitable si ça échoue.
+
+    Source principale : geo.api.gouv.fr. Fallback : api-adresse.data.gouv.fr.
+    Les deux APIs sont publiques, gratuites et sans clé.
+    """
+    cp = cp.strip()
+    if not re.fullmatch(r"\d{5}", cp):
+        raise PostcodeNotFound(f"Code postal invalide: {cp!r}.")
+
+    primary_error: GeocodeServiceError | None = None
+    try:
+        return _coordinates_from_geo_api(cp)
+    except GeocodeServiceError as e:
+        primary_error = e
+    except PostcodeNotFound:
+        pass
+
+    try:
+        return _coordinates_from_adresse_api(cp)
+    except PostcodeNotFound as e:
+        if primary_error:
+            raise GeocodeServiceError(
+                f"{primary_error} Géocodage de secours: {e}",
+                hint=primary_error.hint,
+            ) from e
+        raise PostcodeNotFound(f"Code postal {cp} introuvable.") from e
+    except GeocodeServiceError as e:
+        if primary_error:
+            raise GeocodeServiceError(
+                f"{primary_error} Géocodage de secours: {e}",
+                hint=primary_error.hint or e.hint,
+            ) from e
+        raise
+
+
+def geocode_cp(cp: str) -> tuple[float, float] | None:
+    """Compatibilité historique : renvoie None au lieu de lever."""
+    try:
+        return geocode_cp_or_raise(cp)
+    except GeocodeError:
         return None
-    lon, lat = coords  # GeoJSON = [lon, lat]
-    return float(lat), float(lon)
 
 
 def _fetch_lm_stores() -> list[dict]:
