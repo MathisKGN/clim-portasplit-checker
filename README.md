@@ -153,6 +153,7 @@ En clair : tu peux utiliser, modifier et redistribuer le code, y compris des ver
 - **« python n'est pas reconnu »** → essaie `python3 install.py` puis `python3 run.py`. Sinon, réinstalle Python en cochant bien « Add Python to PATH » sur Windows, puis **ferme et rouvre** le terminal.
 - **Ça plante au premier lancement** → refais l'étape 4 avec `python install.py` ou `python3 install.py`, elle installe tout ce qu'il faut.
 - **Après une mise à jour du dossier, ça replante** → relance simplement `python install.py` ou `python3 install.py`, puis relance avec `python run.py` ou `python3 run.py`.
+- **Sur Mac, erreur `CERTIFICATE_VERIFY_FAILED` pendant la géolocalisation** → lance `open "/Applications/Python 3.13/Install Certificates.command"` dans le terminal, en remplaçant `3.13` par ta version Python si besoin, puis relance `python3 install.py`.
 - **Tu ne retrouves pas le dossier dans le terminal** → recommence l'étape 3 (le glisser-déposer sur Mac, ou le `cmd` dans la barre d'adresse sur Windows).
 
 C'est tout. Prends soin de toi et reste au frais. ❄️

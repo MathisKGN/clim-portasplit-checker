@@ -30,6 +30,43 @@ def _run(cmd: list[str], *, step: str) -> None:
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
+def _mac_certificate_command() -> str | None:
+    if sys.platform != "darwin":
+        return None
+    pyver = f"{sys.version_info.major}.{sys.version_info.minor}"
+    return f'open "/Applications/Python {pyver}/Install Certificates.command"'
+
+
+def _check_geocode_https(py: Path) -> None:
+    """Diagnostic non bloquant pour les certificats Python sur macOS."""
+    print("\n==> Verification HTTPS geo.api.gouv.fr", flush=True)
+    code = (
+        "import urllib.request\n"
+        "url = 'https://geo.api.gouv.fr/communes?codePostal=94000&fields=nom,centre,population&format=json'\n"
+        "with urllib.request.urlopen(url, timeout=10) as r:\n"
+        "    r.read(1)\n"
+    )
+    proc = subprocess.run(
+        [str(py), "-c", code],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode == 0:
+        print("OK", flush=True)
+        return
+
+    print("ATTENTION: le test HTTPS vers geo.api.gouv.fr a echoue.", flush=True)
+    detail = (proc.stderr or proc.stdout).strip()
+    if detail:
+        print(detail, flush=True)
+    cert_cmd = _mac_certificate_command()
+    if cert_cmd:
+        print("\nSur Mac, si tu vois CERTIFICATE_VERIFY_FAILED, lance :", flush=True)
+        print(f"  {cert_cmd}", flush=True)
+        print("Puis relance python3 install.py.", flush=True)
+
+
 def _check_python() -> None:
     if sys.version_info < (3, 9):
         version = ".".join(map(str, sys.version_info[:3]))
@@ -54,6 +91,7 @@ def main() -> int:
     _run([str(py), "-m", "pip", "install", "--upgrade", "pip"], step="Mise a jour de pip")
     _run([str(py), "-m", "pip", "install", "-r", "requirements.txt"], step="Installation des dependances")
     _run([str(py), "-m", "camoufox", "fetch"], step="Installation du navigateur Camoufox")
+    _check_geocode_https(py)
 
     print("\nInstallation terminee.")
     print("Pour lancer le programme:")
