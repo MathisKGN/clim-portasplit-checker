@@ -7,7 +7,7 @@ Flow
 ----
 1. Bannière de bienvenue.
 2. Choix enseigne.
-3. Pour LM : code postal + rayon de scan.
+3. Pour LM / Castorama : code postal + rayon de scan.
 4. Produit par défaut.
 5. Mode : one-shot ou boucle (intervalle).
 6. Alerte Telegram : garder / configurer / désactiver.
@@ -117,10 +117,11 @@ def _save_last_postcode(
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
-def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
-    """Demande un code postal + un rayon, calcule les seeds à la volée.
+def _pick_scan_area(data_dir: str | Path, *, need_lm_seeds: bool) -> dict | None:
+    """Demande un code postal + un rayon, et prépare la zone de scan.
 
-    Renvoie (seeds, zone_label) où seeds est une liste de (label, lat, lon).
+    Renvoie un dict contenant postcode, area_center, radius_km, zone_label,
+    et custom_seeds quand Leroy Merlin fait partie du scan.
     Renvoie None si l'utilisateur annule.
     """
     import questionary
@@ -182,27 +183,46 @@ def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
         _save_last_postcode(data_dir, cp, center)
         default_cp = cp
 
-        console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
-        try:
-            seeds, n_stores = compute_seeds(center, radius_km)
-        except Exception as e:
-            console.print(
-                "  [red]Impossible de charger la liste des magasins Leroy Merlin.[/] "
-                f"[dim]{e}[/]\n"
-                "  Vérifie ta connexion puis relance le programme."
-            )
-            return None
-        if not seeds:
-            console.print(
-                f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "
-                f"{radius_km} km.[/] Élargis le rayon.")
-            continue
+        seeds = None
+        if need_lm_seeds:
+            console.print("  [dim]Chargement des magasins Leroy Merlin…[/]")
+            try:
+                seeds, n_stores = compute_seeds(center, radius_km)
+            except Exception as e:
+                console.print(
+                    "  [red]Impossible de charger la liste des magasins Leroy Merlin.[/] "
+                    f"[dim]{e}[/]\n"
+                    "  Vérifie ta connexion puis relance le programme."
+                )
+                return None
+            if not seeds:
+                console.print(
+                    f"  [yellow]Aucun magasin Leroy Merlin dans un rayon de "
+                    f"{radius_km} km.[/] Élargis le rayon.")
+                continue
 
-        label = f"{cp} · {radius_km} km ({n_stores} magasins)"
-        console.print(
-            f"  [green]✓[/] {n_stores} magasins couverts par "
-            f"[bold]{len(seeds)} point(s)[/] de scan.")
-        return seeds, label
+            console.print(
+                f"  [green]✓[/] {n_stores} magasins Leroy Merlin couverts par "
+                f"[bold]{len(seeds)} point(s)[/] de scan.")
+        else:
+            console.print(f"  [green]✓[/] Zone de scan : {cp} · {radius_km} km.")
+
+        label = f"{cp} · {radius_km} km"
+        return {
+            "postcode": cp,
+            "area_center": center,
+            "radius_km": radius_km,
+            "zone_label": label,
+            "custom_seeds": seeds,
+        }
+
+
+def _pick_lm_area(data_dir: str | Path) -> tuple[list, str] | None:
+    """Compatibilité historique : renvoie seulement les seeds LM + label."""
+    area = _pick_scan_area(data_dir, need_lm_seeds=True)
+    if area is None:
+        return None
+    return area["custom_seeds"], area["zone_label"]
 
 
 def _pick_loop() -> int | None:
@@ -692,14 +712,25 @@ def _build_namespace(overrides: dict, cfg: dict) -> argparse.Namespace:
     ns = argparse.Namespace()
     # Champs communs + overrides spécifiques (zone/wide pour LM, …).
     keys = ("config", "data_dir", "loop", "notify_cmd", "product_ref",
-            "product_url", "verbose", "zone", "wide",
-            "custom_seeds", "zone_label")
+            "product_url", "verbose", "zone", "wide", "postcode",
+            "area_center", "radius_km", "custom_seeds", "zone_label")
     for k in keys:
         if k in overrides:
             setattr(ns, k, overrides[k])
         else:
             setattr(ns, k, None)
     return ns
+
+
+def _apply_scan_area_overrides(overrides: dict, area: dict) -> None:
+    """Propage la même zone utilisateur aux scanners qui savent l'utiliser."""
+    overrides["postcode"] = area["postcode"]
+    overrides["area_center"] = area["area_center"]
+    overrides["radius_km"] = area["radius_km"]
+    overrides["zone_label"] = area["zone_label"]
+    overrides["zone"] = area["zone_label"]
+    if area.get("custom_seeds"):
+        overrides["custom_seeds"] = area["custom_seeds"]
 
 
 class _NullStdout:
@@ -824,15 +855,14 @@ def main() -> int:
         cls = REGISTRY[retailer_key]
         scanners = [cls()]
 
-    # 3. Zone (LM uniquement)
-    for sc in scanners:
-        if sc.CONFIG_KEY == "lm":
-            area = _pick_lm_area(data_dir)
-            if area is None:
-                return 1
-            overrides["custom_seeds"], overrides["zone_label"] = area
-            overrides["zone"] = area[1]
-            break
+    # 3. Zone (Leroy Merlin / Castorama)
+    needs_area = any(sc.CONFIG_KEY in {"lm", "casto"} for sc in scanners)
+    needs_lm_seeds = any(sc.CONFIG_KEY == "lm" for sc in scanners)
+    if needs_area:
+        area = _pick_scan_area(data_dir, need_lm_seeds=needs_lm_seeds)
+        if area is None:
+            return 1
+        _apply_scan_area_overrides(overrides, area)
 
     # 4. Mode boucle
     loop_sec = _pick_loop()
