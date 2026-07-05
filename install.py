@@ -42,8 +42,10 @@ def _check_geocode_https(py: Path) -> None:
     print("\n==> Verification HTTPS geo.api.gouv.fr", flush=True)
     code = (
         "import urllib.request\n"
+        "from stockmonitor.seeds_dynamic import _urlopen_with_ssl_fallback\n"
         "url = 'https://geo.api.gouv.fr/communes?codePostal=94000&fields=nom,centre,population&format=json'\n"
-        "with urllib.request.urlopen(url, timeout=10) as r:\n"
+        "req = urllib.request.Request(url, headers={'User-Agent': 'stockmonitor/1.0'})\n"
+        "with _urlopen_with_ssl_fallback(req, timeout=10) as r:\n"
         "    r.read(1)\n"
     )
     proc = subprocess.run(
