@@ -54,3 +54,10 @@ product_ref = "7970579"
 product_url = "https://www.darty.com/nav/achat/gros_electromenager/chauffage_climatisation/climatiseur/midea_mmcs-12hrn8-qrd0.html"
 min_delay = 1.0
 max_delay = 2.0
+
+[optimea]
+# Produit — scan fiche produit en ligne (WooCommerce product:availability).
+product_ref = "MMCS-12HRN8-QRD0"
+product_url = "https://www.optimea.fr/product/climatiseur-split-mobile-midea/"
+min_delay = 1.0
+max_delay = 2.0

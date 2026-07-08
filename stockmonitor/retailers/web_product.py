@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import sys
 from contextlib import contextmanager
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -50,6 +51,32 @@ IN_PATTERNS = (
 )
 
 
+def _structured_availability(html: str, url: str = "") -> tuple[str, str] | None:
+    """Lit les signaux schema.org / WooCommerce quand la page les expose."""
+    soup = BeautifulSoup(html or "", "lxml")
+    values: list[str] = []
+
+    for tag in soup.find_all("meta"):
+        key = (tag.get("property") or tag.get("name") or "").strip().lower()
+        if key in {"product:availability", "availability", "og:availability"}:
+            content = (tag.get("content") or "").strip()
+            if content:
+                values.append(content)
+
+    for tag in soup.find_all(attrs={"itemprop": "availability"}):
+        content = (tag.get("content") or tag.get("href") or tag.get_text(" ", strip=True))
+        if content:
+            values.append(str(content).strip())
+
+    for value in values:
+        norm = normalize_text(urljoin(url, value))
+        if "outofstock" in norm or "out of stock" in norm or "rupture" in norm:
+            return "OUT", value
+        if "instock" in norm or "in stock" in norm or "en stock" in norm:
+            return "IN", value
+    return None
+
+
 def _visible_text(html: str) -> str:
     soup = BeautifulSoup(html, "lxml")
     for tag in soup(["script", "style", "noscript", "svg"]):
@@ -67,6 +94,11 @@ def classify_product_page(html: str, url: str = "") -> tuple[str, str, bool]:
     raw = html or ""
     visible = _visible_text(raw)
     norm = normalize_text(f"{url} {raw[:4000]} {visible}")
+
+    structured = _structured_availability(raw, url)
+    if structured:
+        state, status_text = structured
+        return state, status_text, False
 
     if any(p in norm for p in BLOCK_PATTERNS):
         return "UNKNOWN", "Page bloquée par protection anti-bot", True

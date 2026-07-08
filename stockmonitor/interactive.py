@@ -61,6 +61,7 @@ def _pick_retailer() -> str | None:
             questionary.Choice("Castorama", value="casto"),
             questionary.Choice("ManoMano", value="manomano"),
             questionary.Choice("Darty", value="darty"),
+            questionary.Choice("Optimea", value="optimea"),
             questionary.Choice("Toutes (en séquence)", value="all"),
         ],
         use_arrow_keys=True,
@@ -293,7 +294,7 @@ set -u
 TELEGRAM_BOT_TOKEN={_quote_sh(token)}
 TELEGRAM_CHAT_ID={_quote_sh(chat_id)}
 
-MESSAGE="${{LM_MESSAGE:-${{CASTO_MESSAGE:-${{MANOMANO_MESSAGE:-${{DARTY_MESSAGE:-${{WEB_MESSAGE:-}}}}}}}}}}"
+MESSAGE="${{LM_MESSAGE:-${{CASTO_MESSAGE:-${{MANOMANO_MESSAGE:-${{DARTY_MESSAGE:-${{OPTIMEA_MESSAGE:-${{WEB_MESSAGE:-}}}}}}}}}}}}"
 
 if [ -z "${{MESSAGE}}" ]; then
   exit 0

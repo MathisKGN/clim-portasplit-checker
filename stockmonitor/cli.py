@@ -6,6 +6,7 @@ Usage
   python -m stockmonitor casto         # boucle Castorama
   python -m stockmonitor manomano      # fiche produit ManoMano
   python -m stockmonitor darty         # fiche produit Darty
+  python -m stockmonitor optimea       # fiche produit Optimea
   python -m stockmonitor all           # tous les adapteurs, en séquence
 
   python -m stockmonitor lm --product-ref 12345678 --product-url https://...

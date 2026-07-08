@@ -93,7 +93,7 @@ python run.py
 
 Ensuite, **tu n'as qu'à répondre aux questions** avec les flèches ⬆️⬇️ du clavier et la touche **Entrée** :
 
-1. **Quelle enseigne ?** → Leroy Merlin, Castorama, ou les deux.
+1. **Quelle enseigne ?** → Leroy Merlin, Castorama, ManoMano, Darty, Optimea, ou toutes.
 2. **Ton code postal ?** → tape ton code postal (5 chiffres, ex. `59000`). Il sera reproposé automatiquement aux prochains lancements.
 3. **Quel rayon ?** → un nombre de km entre 5 et 700 autour de chez toi. Le programme trouve tout seul les magasins dans ce périmètre et calcule le minimum de points à scanner.
 4. **Un seul scan ou en boucle ?** → « boucle » revérifie tout seul toutes les 1 / 5 / 10 / 15 / 30 / 60 min.
@@ -114,6 +114,7 @@ Le TUI est le lancement recommandé. Si tu veux automatiser ou lancer une enseig
 ```
 python run.py lm --loop 900
 python run.py casto --postcode 59000 --radius-km 15 --loop 900
+python run.py optimea --loop 900
 python run.py all --loop 900
 ```
 

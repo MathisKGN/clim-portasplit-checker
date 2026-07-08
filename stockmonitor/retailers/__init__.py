@@ -11,12 +11,14 @@ from .lm import LmScanner
 from .casto import CastoScanner
 from .manomano import ManoManoScanner
 from .darty import DartyScanner
+from .optimea import OptimeaScanner
 
 REGISTRY: dict[str, type[ScannerBase]] = {
     "lm":         LmScanner,
     "casto":      CastoScanner,
     "manomano":   ManoManoScanner,
     "darty":      DartyScanner,
+    "optimea":    OptimeaScanner,
     "leroymerlin": LmScanner,
     "castorama":   CastoScanner,
 }
