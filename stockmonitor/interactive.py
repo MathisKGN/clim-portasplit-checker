@@ -714,7 +714,8 @@ def _build_namespace(overrides: dict, cfg: dict) -> argparse.Namespace:
     """Construit un Namespace vierge puis laisse apply_config remplir."""
     ns = argparse.Namespace()
     # Champs communs + overrides spécifiques (zone/wide pour LM, …).
-    keys = ("config", "data_dir", "loop", "notify_cmd", "product_ref",
+    keys = ("config", "data_dir", "loop", "notify_cmd", "alert_always",
+            "product_ref",
             "product_url", "verbose", "zone", "wide", "postcode",
             "area_center", "radius_km", "custom_seeds", "zone_label")
     for k in keys:
@@ -912,6 +913,25 @@ def main() -> int:
     if notify_cmd is None:
         return 1
     overrides["notify_cmd"] = notify_cmd
+
+    # 5 bis. Mode d'alerte (uniquement si une alerte est configurée)
+    if notify_cmd:
+        import questionary
+        alert_mode = questionary.select(
+            "Quand envoyer l'alerte ?",
+            choices=[
+                questionary.Choice(
+                    "Seulement quand un NOUVEAU stock apparaît (anti-spam)",
+                    value=False),
+                questionary.Choice(
+                    "À chaque scan tant qu'il y a du stock (même déjà vu)",
+                    value=True),
+            ],
+            use_arrow_keys=True,
+        ).ask()
+        if alert_mode is None:
+            return 1
+        overrides["alert_always"] = alert_mode
 
     # 6. Exécution
     state: dict = {

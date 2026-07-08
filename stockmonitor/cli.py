@@ -73,6 +73,9 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--notify-cmd", default=None, metavar="SH",
                         help="Commande shell exécutée si restock "
                              "(env: <PREFIX>_MESSAGE, <PREFIX>_STORES, …).")
+    parser.add_argument("--alert-always", action="store_true", default=None,
+                        help="Alerte à chaque scan tant qu'il y a du stock, "
+                             "même déjà signalé (pas d'anti-spam).")
     parser.add_argument("--product-ref", default=None, metavar="REF",
                         help="Override réf/EAN produit (sinon config.toml).")
     parser.add_argument("--product-url", default=None, metavar="URL",
@@ -161,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     _fallback(args, "data_dir", str(Path("data")), cfg.get("common", {}))
     _fallback(args, "loop", 900, cfg.get("common", {}))
     _fallback(args, "notify_cmd", "", cfg.get("common", {}))
+    _fallback(args, "alert_always", False, cfg.get("common", {}))
     _fallback(args, "verbose", False, cfg.get("common", {}))
     _warn_loop_interval(args.loop)
     Path(args.data_dir).mkdir(parents=True, exist_ok=True)

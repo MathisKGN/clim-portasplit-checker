@@ -282,8 +282,14 @@ class ScannerBase(ABC):
         online = result.get("extra", {}).get("online", {})
         online_now = bool(online.get("available")) if online else False
 
-        fresh_stores = [s for s in in_stock if self._store_id(s) not in prev_in]
-        fresh_online = online_now and not prev_online
+        if getattr(args, "alert_always", False):
+            # Mode simple : on alerte à chaque scan tant qu'il y a du stock,
+            # même s'il a déjà été signalé (pas d'anti-spam).
+            fresh_stores = list(in_stock)
+            fresh_online = online_now
+        else:
+            fresh_stores = [s for s in in_stock if self._store_id(s) not in prev_in]
+            fresh_online = online_now and not prev_online
 
         persisted_in = now_in if completed else (prev_in | now_in)
         state_record = {
